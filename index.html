@@ -310,6 +310,7 @@ function iniciarApp() {
   document.getElementById('sidebar-nome').textContent = usuarioAtual.nome;
   document.getElementById('sidebar-email').textContent = usuarioAtual.usuario;
   if (usuarioAtual.perfil === 'admin') document.getElementById('nav-admin').classList.remove('hidden');
+  carregarDadosFixos(); // pré-carrega tipos e unidades
   showView('dashboard');
   verificarOllama();
 }
@@ -379,6 +380,7 @@ function renderCards(lista, grid) {
 }
 
 function criarCard(p) {
+  const sei = p.numero_sei || p.sei;
   const div = document.createElement('div');
   div.className = 'process-card';
   const horas = horasDesdeData(p.data_atualizacao || p.data_cadastro);
@@ -391,7 +393,13 @@ function criarCard(p) {
   }
   const priBadge = (p.prioridade || '').replace('á','a').replace('é','e');
   div.innerHTML = `
-    <div class="sei-num">SEI: ${p.sei}</div>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+      <div class="sei-num">SEI: ${sei}</div>
+      <button class="btn-deletar-card" onclick="deletarProcessoCard(event,'${sei}')" title="Excluir processo"
+        style="background:none;border:none;cursor:pointer;color:#d1d5db;font-size:.85rem;padding:0;line-height:1;">
+        <i class="fa fa-trash"></i>
+      </button>
+    </div>
     <div class="titulo">${p.titulo}</div>
     ${p.situacao_atual ? `<div class="situacao">${p.situacao_atual}</div>` : ''}
     ${p.ultimo_andamento_resumo ? `<div class="ultimo-and"><i class="fa fa-clock" style="margin-right:4px;color:var(--muted);"></i>${p.ultimo_andamento_resumo}${p.ultimo_andamento_data ? ' <small>('+formatarData(p.ultimo_andamento_data)+')</small>' : ''}</div>` : ''}
@@ -400,8 +408,21 @@ function criarCard(p) {
       <span class="badge-status">${p.status}</span>
       ${atrasado ? `<span style="color:${p.prioridade==='Máxima'?'#7c3aed':p.prioridade==='Alta'?'#dc2626':'#ca8a04'};font-size:.72rem;font-weight:600;">⚠ Atrasado</span>` : ''}
     </div>`;
-  div.onclick = () => abrirProcesso(p.sei);
+  div.onclick = () => abrirProcesso(sei);
   return div;
+}
+
+async function deletarProcessoCard(event, sei) {
+  event.stopPropagation(); // não abre o processo
+  if (!confirm(`Excluir o processo SEI ${sei}?\n\nEsta ação não pode ser desfeita.`)) return;
+  const res = await api('processos/deletar', { sei });
+  if (res.ok) {
+    todosProcessos = todosProcessos.filter(p => (p.numero_sei || p.sei) !== sei);
+    aplicarFiltros();
+    await api('log/registrar', { acao: 'DELETAR_PROCESSO', referencia: sei, detalhes: 'Excluído do dashboard' });
+  } else {
+    alert('Erro ao excluir: ' + (res.erro || 'Tente novamente.'));
+  }
 }
 
 let filtroStatus = '', filtroPrioridade = '', filtroTexto = '';
@@ -517,8 +538,8 @@ async function abrirProcesso(sei) {
     ${proc.situacao_atual ? `<div class="situacao" style="margin-bottom:10px;">${proc.situacao_atual}</div>` : ''}
     <div style="font-size:.82rem;color:var(--muted);display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;">
       <span><b>Tipo:</b> ${proc.tipo||'—'}</span>
-      <span><b>Responsável:</b> ${proc.responsavel||'—'}</span>
-      <span><b>Contratada:</b> ${proc.contratada||'—'}</span>
+      <span><b>Unidade:</b> ${proc.unidade||proc.responsavel||'—'}</span>
+      <span><b>OSS:</b> ${proc.oss||proc.contratada||'—'}</span>
       <span><b>Cadastro:</b> ${formatarData(proc.data_cadastro)}</span>
       <span><b>Atualização:</b> ${formatarData(proc.data_atualizacao)}</span>
     </div>
@@ -969,13 +990,77 @@ function filtrarBlocos(blocos, keywords, maxChars) {
   return resultado;
 }
 
+// ==================== DADOS FIXOS ====================
+let _tipos = [], _unidades = [];
+async function carregarDadosFixos() {
+  const [resT, resU] = await Promise.all([
+    api('dados-fixos/listar?categoria=tipo'),
+    api('dados-fixos/listar?categoria=unidade')
+  ]);
+  _tipos = (resT.itens || []).map(i => i.valor);
+  _unidades = resU.itens || [];
+}
+
+function optsTipos(sel) {
+  const opcoes = _tipos.length ? _tipos : ['Contrato','Convênio','Aditivo','Ata de Registro','Autorização','Outro'];
+  return opcoes.map(t => `<option ${sel===t?'selected':''}>${t}</option>`).join('');
+}
+function optsUnidades(sel) {
+  return _unidades.map(u => `<option value="${u.valor}" data-oss="${u.associado}" ${sel===u.valor?'selected':''}>${u.valor}</option>`).join('');
+}
+
+function tipoSelecionado() {
+  const v = document.getElementById('w-tipo-novo')?.value;
+  if (v === '__novo__') mostrarNovoTipo();
+}
+function mostrarNovoTipo() {
+  const nome = prompt('Nome do novo tipo:');
+  if (!nome) return;
+  api('dados-fixos/criar', { categoria: 'tipo', valor: nome }).then(r => {
+    if (r.ok) { _tipos.push(nome); alert('Tipo "'+nome+'" adicionado!'); renderWizardStep(); }
+    else alert('Erro: ' + r.erro);
+  });
+}
+function excluirTipo(nome) {
+  if (!confirm('Excluir tipo "'+nome+'"?')) return;
+  const item = (_unidades.length === 0 ? [] : _tipos).find ? null : null;
+  // busca pelo valor
+  api('dados-fixos/listar?categoria=tipo').then(r => {
+    const found = (r.itens||[]).find(i => i.valor === nome);
+    if (!found) { alert('Tipo não encontrado.'); return; }
+    api('dados-fixos/remover', { id: found.id }).then(r2 => {
+      if (r2.ok) { _tipos = _tipos.filter(t => t !== nome); renderWizardStep(); }
+    });
+  });
+}
+
+function unidadeSelecionada() {
+  const sel = document.getElementById('w-unidade');
+  if (!sel) return;
+  if (sel.value === '__nova__') { mostrarNovaUnidade(); return; }
+  const opt = sel.options[sel.selectedIndex];
+  const oss = opt?.getAttribute('data-oss') || '';
+  const ossEl = document.getElementById('w-oss');
+  if (ossEl) ossEl.value = oss;
+}
+function mostrarNovaUnidade() {
+  const unidade = prompt('Nome da Unidade:');
+  if (!unidade) return;
+  const oss = prompt('OSS associada a esta unidade:') || '';
+  api('dados-fixos/criar', { categoria: 'unidade', valor: unidade, associado: oss }).then(r => {
+    if (r.ok) { _unidades.push({ valor: unidade, associado: oss }); alert('Unidade adicionada!'); renderWizardStep(); }
+    else alert('Erro: ' + r.erro);
+  });
+}
+
 // ==================== NOVO PROCESSO ====================
 let wizardStep = 1;
 let novoProc = {};
 
-function renderNovo() {
+async function renderNovo() {
   wizardStep = 1;
   novoProc = {};
+  await carregarDadosFixos();
   const content = document.getElementById('content');
   content.innerHTML = `
   <div style="max-width:680px;margin:0 auto;">
@@ -997,12 +1082,21 @@ function renderWizardStep() {
   if (wizardStep === 1) {
     body.innerHTML = `
       <h3 style="margin-bottom:16px;">Identificação do Processo</h3>
-      <div class="form-group"><label>Número SEI *</label><input id="w-sei" value="${novoProc.sei||''}" placeholder="Ex: 2024.0001234"></div>
+      <div class="form-group"><label>Número SEI *</label><input id="w-sei" value="${novoProc.sei||''}" placeholder="Ex: 2300002104.000011/2025-91"></div>
       <div class="form-group"><label>Título / Objeto *</label><input id="w-titulo" value="${novoProc.titulo||''}" placeholder="Descrição resumida do processo"></div>
-      <div class="form-group"><label>Tipo</label>
-        <select id="w-tipo">
-          ${['Contrato','Convênio','Aditivo','Ata de Registro','Autorização','Outro'].map(t => `<option ${novoProc.tipo===t?'selected':''}>${t}</option>`).join('')}
-        </select>
+      <div class="form-group">
+        <label>Tipo</label>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <select id="w-tipo" style="flex:1;" onchange="tipoSelecionado()">
+            ${optsTipos(novoProc.tipo)}
+            <option value="__novo__">+ Cadastrar novo tipo...</option>
+          </select>
+        </div>
+        ${_tipos.length ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">
+          ${_tipos.map(t=>`<span style="background:#f3f4f6;border-radius:4px;padding:2px 8px;font-size:.75rem;">${t}
+            <button onclick="excluirTipo('${t}')" style="background:none;border:none;cursor:pointer;color:#ef4444;margin-left:2px;">✕</button>
+          </span>`).join('')}
+        </div>` : ''}
       </div>
       <div class="flex gap-2 mt-4"><button class="btn btn-primary" onclick="wizardNext()">Próximo <i class="fa fa-arrow-right"></i></button></div>`;
   } else if (wizardStep === 2) {
@@ -1018,8 +1112,18 @@ function renderWizardStep() {
           ${['Baixa','Média','Alta','Máxima'].map(p => `<option ${novoProc.prioridade===p?'selected':''}>${p}</option>`).join('')}
         </select>
       </div>
-      <div class="form-group"><label>Responsável</label><input id="w-responsavel" value="${novoProc.responsavel||''}"></div>
-      <div class="form-group"><label>Contratada</label><input id="w-contratada" value="${novoProc.contratada||''}"></div>
+      <div class="form-group">
+        <label>Unidade</label>
+        <select id="w-unidade" onchange="unidadeSelecionada()">
+          <option value="">— Selecione a unidade —</option>
+          ${optsUnidades(novoProc.unidade)}
+          <option value="__nova__">+ Cadastrar nova unidade/OSS...</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>OSS <small style="color:var(--muted);">(preenchido automaticamente)</small></label>
+        <input id="w-oss" value="${novoProc.oss||''}" placeholder="Preenchido ao selecionar a Unidade" style="background:#f9fafb;">
+      </div>
       <div class="form-group"><label>Descrição</label><textarea id="w-descricao">${novoProc.descricao||''}</textarea></div>
       <div class="flex gap-2 mt-4">
         <button class="btn btn-secondary" onclick="wizardPrev()"><i class="fa fa-arrow-left"></i> Voltar</button>
@@ -1058,8 +1162,8 @@ function renderWizardStep() {
       <div style="background:#f9fafb;border-radius:8px;padding:16px;font-size:.85rem;margin-bottom:16px;">
         <b>SEI:</b> ${novoProc.sei}<br>
         <b>Título:</b> ${novoProc.titulo}<br>
-        <b>Tipo:</b> ${novoProc.tipo} — <b>Status:</b> ${novoProc.status} — <b>Prioridade:</b> ${novoProc.prioridade}<br>
-        <b>Responsável:</b> ${novoProc.responsavel||'—'} — <b>Contratada:</b> ${novoProc.contratada||'—'}<br>
+        <b>Tipo:</b> ${novoProc.tipo||'—'} — <b>Status:</b> ${novoProc.status} — <b>Prioridade:</b> ${novoProc.prioridade}<br>
+        <b>Unidade:</b> ${novoProc.unidade||'—'} — <b>OSS:</b> ${novoProc.oss||'—'}<br>
         <b>Documentos:</b> ${novoProc._files ? novoProc._files.length : 0}<br>
         <b>Andamentos:</b> ${novoProc.andamentos ? 'Sim' : 'Não'}
       </div>
@@ -1087,8 +1191,9 @@ function wizardNext() {
   } else if (wizardStep === 2) {
     novoProc.status = document.getElementById('w-status').value;
     novoProc.prioridade = document.getElementById('w-prioridade').value;
-    novoProc.responsavel = document.getElementById('w-responsavel').value.trim();
-    novoProc.contratada = document.getElementById('w-contratada').value.trim();
+    novoProc.unidade = document.getElementById('w-unidade')?.value || '';
+    if (novoProc.unidade === '__nova__') novoProc.unidade = '';
+    novoProc.oss = document.getElementById('w-oss')?.value.trim() || '';
     novoProc.descricao = document.getElementById('w-descricao').value.trim();
   } else if (wizardStep === 4) {
     novoProc.andamentos = document.getElementById('w-andamentos').value.trim();
@@ -1111,7 +1216,7 @@ async function cadastrarProcesso() {
   const res = await api('processos/criar', {
     sei: novoProc.sei, titulo: novoProc.titulo, tipo: novoProc.tipo,
     status: novoProc.status, prioridade: novoProc.prioridade,
-    responsavel: novoProc.responsavel, contratada: novoProc.contratada,
+    unidade: novoProc.unidade, oss: novoProc.oss,
     descricao: novoProc.descricao
   });
 
@@ -1160,11 +1265,13 @@ async function renderAdmin() {
   <div class="tabs">
     <div class="tab active" onclick="switchTabAdmin(this,'adm-usuarios')">Usuários</div>
     <div class="tab" onclick="switchTabAdmin(this,'adm-config')">Configurações</div>
+    <div class="tab" onclick="switchTabAdmin(this,'adm-dados')">Dados Fixos</div>
     <div class="tab" onclick="switchTabAdmin(this,'adm-bases')">Bases Legais</div>
     <div class="tab" onclick="switchTabAdmin(this,'adm-logs')">Logs</div>
   </div>
   <div id="adm-usuarios"><span class="spinner"></span> Carregando...</div>
   <div id="adm-config" class="hidden"><span class="spinner"></span> Carregando...</div>
+  <div id="adm-dados" class="hidden"><span class="spinner"></span> Carregando...</div>
   <div id="adm-bases" class="hidden"><span class="spinner"></span> Carregando...</div>
   <div id="adm-logs" class="hidden"><span class="spinner"></span> Carregando...</div>`;
 
@@ -1174,11 +1281,12 @@ async function renderAdmin() {
 function switchTabAdmin(el, id) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
-  ['adm-usuarios','adm-config','adm-bases','adm-logs'].forEach(t => {
+  ['adm-usuarios','adm-config','adm-dados','adm-bases','adm-logs'].forEach(t => {
     const e = document.getElementById(t);
     if (e) e.classList.toggle('hidden', t !== id);
   });
   if (id === 'adm-config') carregarAdmConfig();
+  else if (id === 'adm-dados') carregarAdmDados();
   else if (id === 'adm-bases') carregarAdmBases();
   else if (id === 'adm-logs') carregarAdmLogs();
 }
@@ -1294,6 +1402,91 @@ async function salvarConfig() {
   const s = document.getElementById('cfg-status');
   s.classList.remove('hidden');
   setTimeout(() => s.classList.add('hidden'), 3000);
+}
+
+async function carregarAdmDados() {
+  const el = document.getElementById('adm-dados');
+  await carregarDadosFixos();
+  const [resT, resU] = await Promise.all([
+    api('dados-fixos/listar?categoria=tipo'),
+    api('dados-fixos/listar?categoria=unidade')
+  ]);
+  const tipos = resT.itens || [];
+  const unidades = resU.itens || [];
+  el.innerHTML = `
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:12px;">
+    <div>
+      <div class="flex justify-between items-center" style="margin-bottom:10px;">
+        <h3 style="font-size:.95rem;">Tipos de Processo</h3>
+        <button class="btn btn-primary btn-sm" onclick="mostrarNovoTipoAdmin()"><i class="fa fa-plus"></i> Novo</button>
+      </div>
+      <table class="admin-table">
+        <thead><tr><th>Tipo</th><th></th></tr></thead>
+        <tbody>
+          ${tipos.map(t=>`<tr><td>${t.valor}</td><td>
+            <button class="btn btn-danger btn-sm" onclick="removerDadoFixo('${t.id}','adm-dados')"><i class="fa fa-trash"></i></button>
+          </td></tr>`).join('') || '<tr><td colspan="2" class="text-muted">Nenhum tipo cadastrado.</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <div class="flex justify-between items-center" style="margin-bottom:10px;">
+        <h3 style="font-size:.95rem;">Unidades / OSS</h3>
+        <button class="btn btn-primary btn-sm" onclick="mostrarNovaUnidadeAdmin()"><i class="fa fa-plus"></i> Nova</button>
+      </div>
+      <table class="admin-table">
+        <thead><tr><th>Unidade</th><th>OSS</th><th></th></tr></thead>
+        <tbody>
+          ${unidades.map(u=>`<tr><td>${u.valor}</td><td>${u.associado||'—'}</td><td>
+            <button class="btn btn-danger btn-sm" onclick="removerDadoFixo('${u.id}','adm-dados')"><i class="fa fa-trash"></i></button>
+          </td></tr>`).join('') || '<tr><td colspan="3" class="text-muted">Nenhuma unidade cadastrada.</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+function mostrarNovoTipoAdmin() {
+  criarModal(`
+    <h2>Novo Tipo de Processo</h2>
+    <div class="form-group"><label>Nome do tipo</label><input id="nt-nome" placeholder="Ex: Contrato, Aditivo..."></div>
+    <div class="flex gap-2">
+      <button class="btn btn-primary" onclick="salvarNovoTipoAdmin()">Salvar</button>
+      <button class="btn btn-secondary" onclick="fecharModal()">Cancelar</button>
+    </div>`);
+}
+async function salvarNovoTipoAdmin() {
+  const nome = document.getElementById('nt-nome').value.trim();
+  if (!nome) { alert('Informe o nome.'); return; }
+  const r = await api('dados-fixos/criar', { categoria: 'tipo', valor: nome });
+  if (r.ok) { fecharModal(); await carregarDadosFixos(); carregarAdmDados(); }
+  else alert('Erro: ' + r.erro);
+}
+
+function mostrarNovaUnidadeAdmin() {
+  criarModal(`
+    <h2>Nova Unidade / OSS</h2>
+    <div class="form-group"><label>Nome da Unidade</label><input id="nu2-unidade" placeholder="Ex: UPA Centro"></div>
+    <div class="form-group"><label>OSS Associada</label><input id="nu2-oss" placeholder="Ex: UPAE Palmares"></div>
+    <div class="flex gap-2">
+      <button class="btn btn-primary" onclick="salvarNovaUnidadeAdmin()">Salvar</button>
+      <button class="btn btn-secondary" onclick="fecharModal()">Cancelar</button>
+    </div>`);
+}
+async function salvarNovaUnidadeAdmin() {
+  const unidade = document.getElementById('nu2-unidade').value.trim();
+  const oss = document.getElementById('nu2-oss').value.trim();
+  if (!unidade) { alert('Informe a unidade.'); return; }
+  const r = await api('dados-fixos/criar', { categoria: 'unidade', valor: unidade, associado: oss });
+  if (r.ok) { fecharModal(); await carregarDadosFixos(); carregarAdmDados(); }
+  else alert('Erro: ' + r.erro);
+}
+
+async function removerDadoFixo(id, recarregar) {
+  if (!confirm('Remover este item?')) return;
+  const r = await api('dados-fixos/remover', { id });
+  if (r.ok) { await carregarDadosFixos(); if (recarregar === 'adm-dados') carregarAdmDados(); }
+  else alert('Erro: ' + r.erro);
 }
 
 async function carregarAdmBases() {
