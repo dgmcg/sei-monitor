@@ -259,7 +259,10 @@ window.onload = () => {
 
 // ==================== API ====================
 async function api(path, body = null) {
-  let url = API_URL + (API_URL.includes('?') ? '&' : '?') + 'path=' + encodeURIComponent(path);
+  // Separa o path dos query params extras (ex: 'processos/obter?sei=123' → path + &sei=123)
+  const [basePath, queryStr] = path.split('?');
+  let url = API_URL + (API_URL.includes('?') ? '&' : '?') + 'path=' + encodeURIComponent(basePath);
+  if (queryStr) url += '&' + queryStr;
   // Para GET, envia o token na URL
   if (!body && sessao?.token) url += '&token=' + encodeURIComponent(sessao.token);
   const opts = { redirect: 'follow' };
