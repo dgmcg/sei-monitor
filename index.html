@@ -258,13 +258,17 @@ window.onload = () => {
 };
 
 // ==================== API ====================
-async function api(path, body = null, method = 'GET') {
-  const url = API_URL + (API_URL.includes('?') ? '&' : '?') + 'path=' + encodeURIComponent(path);
-  const opts = { method: body ? 'POST' : 'GET', redirect: 'follow' };
+async function api(path, body = null) {
+  let url = API_URL + (API_URL.includes('?') ? '&' : '?') + 'path=' + encodeURIComponent(path);
+  // Para GET, envia o token na URL
+  if (!body && sessao?.token) url += '&token=' + encodeURIComponent(sessao.token);
+  const opts = { redirect: 'follow' };
   if (body) {
     opts.method = 'POST';
     opts.headers = { 'Content-Type': 'text/plain' };
     opts.body = JSON.stringify({ ...body, token: sessao?.token });
+  } else {
+    opts.method = 'GET';
   }
   const r = await fetch(url, opts);
   const text = await r.text();
