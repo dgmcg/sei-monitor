@@ -1,2040 +1,1507 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>SEI Monitor</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SEI Monitor v2.0</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <style>
-:root {
-  --bg:        #0f172a;
-  --bg2:       #1e293b;
-  --bg3:       #263347;
-  --border:    #334155;
-  --text:      #e2e8f0;
-  --text2:     #94a3b8;
-  --accent:    #3b82f6;
-  --accent2:   #1d4ed8;
-  --maxima:    #dc2626;
-  --alta:      #ea580c;
-  --media:     #ca8a04;
-  --baixa:     #16a34a;
-  --success:   #22c55e;
-  --danger:    #ef4444;
-  --radius:    10px;
-  --shadow:    0 4px 20px rgba(0,0,0,0.4);
-}
-* { box-sizing:border-box; margin:0; padding:0; }
-body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui,sans-serif; min-height:100vh; }
-.hidden { display:none !important; }
-a { color:var(--accent); text-decoration:none; }
-button { cursor:pointer; border:none; border-radius:var(--radius); font-size:14px; transition:all .2s; }
-input, select, textarea {
-  background:var(--bg3); border:1px solid var(--border); color:var(--text);
-  border-radius:var(--radius); padding:10px 14px; width:100%; font-size:14px;
-  outline:none; transition:border .2s;
-}
-input:focus, select:focus, textarea:focus { border-color:var(--accent); }
-textarea { resize:vertical; }
-label { font-size:13px; color:var(--text2); display:block; margin-bottom:5px; }
-.btn { padding:10px 18px; border-radius:var(--radius); font-weight:600; }
-.btn-primary { background:var(--accent); color:#fff; }
-.btn-primary:hover { background:var(--accent2); }
-.btn-danger  { background:var(--danger); color:#fff; }
-.btn-danger:hover { background:#b91c1c; }
-.btn-ghost   { background:transparent; color:var(--text2); border:1px solid var(--border); }
-.btn-ghost:hover { background:var(--bg3); color:var(--text); }
-.btn-sm { padding:6px 12px; font-size:13px; }
-.btn-success { background:var(--success); color:#fff; }
-.card { background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius); padding:20px; }
-.badge {
-  display:inline-flex; align-items:center; gap:4px;
-  padding:3px 10px; border-radius:20px; font-size:12px; font-weight:600;
-}
-.badge-maxima { background:rgba(220,38,38,.2); color:#fca5a5; border:1px solid var(--maxima); }
-.badge-alta   { background:rgba(234,88,12,.2);  color:#fdba74; border:1px solid var(--alta); }
-.badge-media  { background:rgba(202,138,4,.2);  color:#fde047; border:1px solid var(--media); }
-.badge-baixa  { background:rgba(22,163,74,.2);  color:#86efac; border:1px solid var(--baixa); }
-.badge-info   { background:rgba(59,130,246,.2); color:#93c5fd; border:1px solid var(--accent); }
-.badge-neutral{ background:var(--bg3); color:var(--text2); border:1px solid var(--border); }
-
-/* ---- LAYOUT ---- */
-#app-shell { display:flex; height:100vh; overflow:hidden; }
-#sidebar {
-  width:240px; background:var(--bg2); border-right:1px solid var(--border);
-  display:flex; flex-direction:column; flex-shrink:0;
-}
-#sidebar .logo {
-  padding:22px 20px 16px; font-size:20px; font-weight:800;
-  color:var(--accent); letter-spacing:-0.5px; border-bottom:1px solid var(--border);
-}
-#sidebar .logo span { color:var(--text); }
-#sidebar nav { flex:1; padding:12px 0; }
-#sidebar nav a {
-  display:flex; align-items:center; gap:10px; padding:11px 20px;
-  color:var(--text2); font-size:14px; transition:all .15s; border-left:3px solid transparent;
-}
-#sidebar nav a:hover { color:var(--text); background:var(--bg3); }
-#sidebar nav a.active { color:var(--accent); background:rgba(59,130,246,.1); border-left-color:var(--accent); }
-#sidebar nav a i { width:16px; text-align:center; }
-#sidebar .user-box {
-  padding:14px 16px; border-top:1px solid var(--border);
-  font-size:13px; color:var(--text2);
-}
-#sidebar .user-box strong { display:block; color:var(--text); font-size:14px; }
-#sidebar .user-box .logout-btn {
-  margin-top:8px; font-size:12px; color:var(--danger); background:none;
-  border:none; padding:0; cursor:pointer; display:flex; align-items:center; gap:5px;
-}
-
-#main { flex:1; display:flex; flex-direction:column; overflow:hidden; }
-#topbar {
-  padding:14px 24px; background:var(--bg2); border-bottom:1px solid var(--border);
-  display:flex; align-items:center; justify-content:space-between;
-  flex-shrink:0;
-}
-#topbar h1 { font-size:18px; font-weight:700; }
-#content { flex:1; overflow-y:auto; padding:24px; }
-
-/* ---- LOGIN ---- */
-#view-login {
-  min-height:100vh; display:flex; align-items:center; justify-content:center;
-  background:radial-gradient(ellipse at center, #1e293b 0%, #0f172a 100%);
-}
-.login-box {
-  width:100%; max-width:420px; padding:40px; background:var(--bg2);
-  border:1px solid var(--border); border-radius:16px; box-shadow:var(--shadow);
-}
-.login-box .logo-login { font-size:28px; font-weight:800; color:var(--accent); margin-bottom:4px; }
-.login-box .logo-login span { color:var(--text); }
-.login-box p { color:var(--text2); font-size:14px; margin-bottom:28px; }
-.form-group { margin-bottom:18px; }
-.api-config { margin-top:16px; padding-top:16px; border-top:1px solid var(--border); }
-.api-config label { font-size:12px; color:var(--text2); }
-
-/* ---- DASHBOARD ---- */
-.stats-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:14px; margin-bottom:20px; }
-.stat-card {
-  background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius);
-  padding:16px; text-align:center;
-}
-.stat-card .val { font-size:28px; font-weight:800; margin-bottom:2px; }
-.stat-card .lbl { font-size:12px; color:var(--text2); }
-.stat-maxima { border-color:var(--maxima); }
-.stat-alta   { border-color:var(--alta); }
-.stat-media  { border-color:var(--media); }
-.stat-baixa  { border-color:var(--baixa); }
-
-.filter-bar { display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap; }
-.filter-bar input, .filter-bar select { width:auto; flex:1; min-width:160px; }
-
-.processos-grid { display:grid; gap:14px; }
-.proc-card {
-  background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius);
-  padding:18px 20px; cursor:pointer; transition:all .2s; position:relative;
-}
-.proc-card:hover { border-color:var(--accent); transform:translateY(-1px); }
-.proc-card.maxima-card {
-  border:2px solid var(--maxima);
-  background:linear-gradient(135deg, #1e293b 0%, rgba(220,38,38,.08) 100%);
-}
-.proc-card.maxima-card.alerta { animation: pulsar-maxima 2s ease-in-out infinite; }
-.proc-card.alta-card.alerta   { animation: piscar 3s ease-in-out infinite; }
-.proc-card.media-card.alerta  { animation: piscar 4s ease-in-out infinite; }
-.proc-card.baixa-card.alerta  { animation: piscar 6s ease-in-out infinite; }
-@keyframes pulsar-maxima {
-  0%,100% { box-shadow:0 0 10px rgba(220,38,38,.4); border-color:var(--maxima); }
-  50%      { box-shadow:0 0 30px rgba(220,38,38,.9); border-color:#ff6b6b; }
-}
-@keyframes piscar {
-  0%,100% { opacity:1; }
-  50%      { opacity:.65; }
-}
-.proc-card-header { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:8px; }
-.proc-sei { font-weight:700; font-size:15px; color:var(--accent); }
-.proc-titulo { font-size:13px; color:var(--text2); margin-bottom:10px; }
-.proc-meta { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-.dias-badge {
-  font-size:11px; padding:2px 8px; border-radius:12px;
-  background:var(--bg3); color:var(--text2);
-}
-.dias-badge.vencido { background:rgba(239,68,68,.15); color:#fca5a5; }
-.alerta-flag { position:absolute; top:10px; right:10px; font-size:18px; }
-
-/* ---- PROCESSO DETALHE ---- */
-.proc-detail-header {
-  display:flex; align-items:flex-start; justify-content:space-between;
-  margin-bottom:24px; gap:16px; flex-wrap:wrap;
-}
-.proc-detail-header h2 { font-size:22px; font-weight:800; color:var(--accent); }
-.proc-detail-header .meta { font-size:13px; color:var(--text2); margin-top:4px; }
-.tabs { display:flex; gap:4px; border-bottom:1px solid var(--border); margin-bottom:20px; }
-.tab-btn {
-  padding:10px 18px; background:none; border:none; color:var(--text2);
-  font-size:14px; cursor:pointer; border-bottom:2px solid transparent;
-  transition:all .15s;
-}
-.tab-btn:hover { color:var(--text); }
-.tab-btn.active { color:var(--accent); border-bottom-color:var(--accent); font-weight:600; }
-.tab-content { display:none; }
-.tab-content.active { display:block; }
-
-.ia-box { background:var(--bg3); border:1px solid var(--border); border-radius:var(--radius); padding:16px; margin-bottom:16px; }
-.ia-box h4 { font-size:13px; color:var(--text2); margin-bottom:8px; display:flex; align-items:center; gap:6px; }
-.ia-box p, .ia-box .ia-text { font-size:14px; line-height:1.7; white-space:pre-line; }
-
-.doc-item {
-  display:flex; align-items:center; gap:12px; padding:12px 14px;
-  background:var(--bg3); border-radius:var(--radius); margin-bottom:8px;
-}
-.doc-icon { font-size:22px; width:30px; text-align:center; }
-.doc-info { flex:1; }
-.doc-info .doc-name { font-weight:600; font-size:14px; }
-.doc-info .doc-meta { font-size:12px; color:var(--text2); }
-
-.andamento-item { padding:14px 0; border-bottom:1px solid var(--border); }
-.andamento-item:last-child { border-bottom:none; }
-.andamento-header { display:flex; gap:10px; align-items:center; margin-bottom:4px; }
-.andamento-data { font-size:13px; font-weight:600; color:var(--accent); }
-.andamento-hora { font-size:12px; color:var(--text2); }
-.andamento-desc { font-size:14px; line-height:1.6; }
-.andamento-idx  { font-size:11px; color:var(--text2); margin-top:4px; }
-
-.anotacao-item {
-  padding:14px; background:var(--bg3); border-radius:var(--radius);
-  margin-bottom:10px; border-left:3px solid var(--accent);
-}
-.anotacao-meta { font-size:12px; color:var(--text2); margin-bottom:6px; }
-.anotacao-texto { font-size:14px; line-height:1.6; white-space:pre-line; }
-
-/* ---- UPLOAD ---- */
-.drop-zone {
-  border:2px dashed var(--border); border-radius:var(--radius);
-  padding:40px 20px; text-align:center; cursor:pointer;
-  transition:all .2s; margin-bottom:16px;
-}
-.drop-zone:hover, .drop-zone.drag-over {
-  border-color:var(--accent); background:rgba(59,130,246,.05);
-}
-.drop-zone i { font-size:40px; color:var(--text2); margin-bottom:12px; }
-.drop-zone p { color:var(--text2); font-size:14px; }
-.file-list-preview { max-height:240px; overflow-y:auto; }
-.file-preview-item {
-  display:flex; align-items:center; gap:10px; padding:10px 12px;
-  background:var(--bg3); border-radius:8px; margin-bottom:6px; font-size:13px;
-}
-.file-preview-item .fi-status { margin-left:auto; }
-.fi-new      { color:var(--success); }
-.fi-dup      { color:var(--text2); }
-.fi-error    { color:var(--danger); }
-.fi-loading  { color:var(--accent); }
-
-/* ---- NOVO PROCESSO (steps) ---- */
-.steps-bar { display:flex; gap:0; margin-bottom:28px; }
-.step-item {
-  flex:1; text-align:center; padding:10px 6px; font-size:13px;
-  position:relative; color:var(--text2); border-bottom:2px solid var(--border);
-}
-.step-item.active { color:var(--accent); border-bottom-color:var(--accent); font-weight:600; }
-.step-item.done   { color:var(--success); border-bottom-color:var(--success); }
-.step-num {
-  display:inline-flex; align-items:center; justify-content:center;
-  width:24px; height:24px; border-radius:50%; font-size:12px; font-weight:700;
-  background:var(--border); color:var(--text2); margin-bottom:4px;
-}
-.step-item.active .step-num { background:var(--accent); color:#fff; }
-.step-item.done .step-num   { background:var(--success); color:#fff; }
-
-/* ---- ADMIN ---- */
-.users-table { width:100%; border-collapse:collapse; }
-.users-table th, .users-table td { padding:12px 14px; text-align:left; font-size:14px; }
-.users-table th { background:var(--bg3); color:var(--text2); font-size:12px; text-transform:uppercase; }
-.users-table tr { border-bottom:1px solid var(--border); }
-.users-table tr:hover td { background:rgba(255,255,255,.02); }
-.user-actions { display:flex; gap:6px; }
-
-/* ---- MODAL ---- */
-.modal-overlay {
-  position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1000;
-  display:flex; align-items:center; justify-content:center; padding:20px;
-}
-.modal-box {
-  background:var(--bg2); border:1px solid var(--border); border-radius:14px;
-  width:100%; max-width:500px; max-height:90vh; overflow-y:auto;
-}
-.modal-header { padding:20px 24px 16px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
-.modal-header h3 { font-size:17px; font-weight:700; }
-.modal-body { padding:20px 24px; }
-.modal-footer { padding:16px 24px; border-top:1px solid var(--border); display:flex; gap:10px; justify-content:flex-end; }
-.close-btn { background:none; border:none; color:var(--text2); font-size:20px; cursor:pointer; }
-.close-btn:hover { color:var(--text); }
-
-/* ---- CHAT FLUTUANTE ---- */
-#chat-fab {
-  position:fixed; bottom:24px; right:24px; z-index:900;
-  width:54px; height:54px; border-radius:50%;
-  background:var(--accent); color:#fff; font-size:22px;
-  box-shadow:0 4px 20px rgba(59,130,246,.5);
-  display:flex; align-items:center; justify-content:center;
-  transition:all .2s;
-}
-#chat-fab:hover { background:var(--accent2); transform:scale(1.08); }
-#chat-fab .chat-notif {
-  position:absolute; top:-2px; right:-2px;
-  width:12px; height:12px; border-radius:50%;
-  background:var(--maxima); border:2px solid var(--bg);
-}
-#chat-panel {
-  position:fixed; bottom:90px; right:24px; z-index:900;
-  width:380px; height:520px; background:var(--bg2);
-  border:1px solid var(--border); border-radius:16px;
-  box-shadow:var(--shadow); display:flex; flex-direction:column;
-  transition:all .3s; transform-origin:bottom right;
-}
-#chat-panel.hidden { transform:scale(.8); opacity:0; pointer-events:none; }
-.chat-header {
-  padding:14px 16px; border-bottom:1px solid var(--border);
-  display:flex; align-items:center; gap:10px;
-}
-.chat-ai-icon { width:34px; height:34px; border-radius:50%; background:var(--accent); display:flex; align-items:center; justify-content:center; font-size:16px; }
-.chat-header-text h4 { font-size:14px; font-weight:700; }
-.chat-header-text p { font-size:12px; color:var(--text2); }
-#chat-messages { flex:1; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:10px; }
-.msg { max-width:85%; padding:10px 13px; border-radius:12px; font-size:13px; line-height:1.6; }
-.msg-ai   { background:var(--bg3); align-self:flex-start; border-radius:2px 12px 12px 12px; }
-.msg-user { background:var(--accent); color:#fff; align-self:flex-end; border-radius:12px 2px 12px 12px; }
-.msg-ai.thinking { color:var(--text2); font-style:italic; }
-.chat-input-area { padding:12px; border-top:1px solid var(--border); display:flex; gap:8px; }
-.chat-input-area input { flex:1; }
-.chat-input-area button { padding:10px 14px; background:var(--accent); color:#fff; border-radius:8px; font-size:16px; }
-.chat-input-area button:hover { background:var(--accent2); }
-
-/* ---- OLLAMA STATUS ---- */
-#ollama-status {
-  display:flex; align-items:center; gap:6px; font-size:12px;
-  padding:4px 10px; border-radius:20px; background:var(--bg3);
-}
-#ollama-dot { width:8px; height:8px; border-radius:50%; background:var(--text2); }
-#ollama-dot.ok { background:var(--success); box-shadow:0 0 6px var(--success); }
-#ollama-dot.err { background:var(--danger); }
-
-/* ---- AI PROGRESS ---- */
-.ai-progress {
-  background:var(--bg3); border:1px solid var(--border); border-radius:var(--radius);
-  padding:20px; text-align:center; margin-top:16px;
-}
-.ai-progress .spinner { font-size:28px; animation:spin 1.5s linear infinite; display:inline-block; margin-bottom:8px; }
-@keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
-.progress-bar { height:4px; background:var(--bg); border-radius:2px; margin-top:12px; overflow:hidden; }
-.progress-fill { height:100%; background:var(--accent); border-radius:2px; transition:width .4s; }
-
-/* ---- MISC ---- */
-.section-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
-.section-header h3 { font-size:16px; font-weight:700; }
-.empty-state { text-align:center; padding:40px; color:var(--text2); }
-.empty-state i { font-size:40px; margin-bottom:12px; opacity:.4; }
-.toast {
-  position:fixed; bottom:30px; left:50%; transform:translateX(-50%);
-  background:var(--bg2); border:1px solid var(--border); border-radius:10px;
-  padding:12px 20px; font-size:14px; z-index:2000; box-shadow:var(--shadow);
-  display:flex; align-items:center; gap:8px; min-width:200px;
-  animation:slideUp .3s ease;
-}
-@keyframes slideUp { from{transform:translateX(-50%) translateY(20px);opacity:0} to{transform:translateX(-50%) translateY(0);opacity:1} }
-.toast.success { border-color:var(--success); color:var(--success); }
-.toast.error   { border-color:var(--danger);  color:var(--danger); }
-.similar-card {
-  padding:12px; background:var(--bg3); border-radius:8px; margin-bottom:8px;
-  cursor:pointer; transition:background .15s;
-}
-.similar-card:hover { background:var(--border); }
-.grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
-@media(max-width:700px){ .grid-2{grid-template-columns:1fr;} .stats-grid{grid-template-columns:repeat(3,1fr);} }
+:root{--primary:#1a56db;--primary-dark:#1e429f;--success:#057a55;--warning:#c27803;--danger:#e02424;--bg:#f3f4f6;--card:#fff;--border:#e5e7eb;--text:#111827;--muted:#6b7280;--sidebar-w:240px;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Segoe UI',sans-serif;background:var(--bg);color:var(--text);display:flex;height:100vh;overflow:hidden;}
+/* SIDEBAR */
+#sidebar{width:var(--sidebar-w);background:#1f2937;color:#f9fafb;display:flex;flex-direction:column;flex-shrink:0;}
+#sidebar .logo{padding:20px 16px 12px;font-size:1.1rem;font-weight:700;letter-spacing:.5px;border-bottom:1px solid #374151;}
+#sidebar .logo span{color:#60a5fa;}
+#sidebar nav{flex:1;padding:12px 0;}
+#sidebar nav a{display:flex;align-items:center;gap:10px;padding:10px 16px;color:#d1d5db;text-decoration:none;font-size:.9rem;cursor:pointer;transition:background .15s;}
+#sidebar nav a:hover,#sidebar nav a.active{background:#374151;color:#fff;}
+#sidebar nav a i{width:18px;text-align:center;}
+#sidebar .user-info{padding:12px 16px;border-top:1px solid #374151;font-size:.8rem;color:#9ca3af;}
+#sidebar .user-info strong{color:#f9fafb;display:block;}
+#sidebar .ai-status{padding:8px 16px;font-size:.75rem;}
+#sidebar .ai-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;}
+#sidebar .ai-dot.on{background:#10b981;}
+#sidebar .ai-dot.off{background:#ef4444;}
+/* MAIN */
+#main{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+#topbar{background:#fff;border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+#topbar h1{font-size:1.1rem;font-weight:600;}
+#topbar .actions{display:flex;gap:8px;}
+#content{flex:1;overflow-y:auto;padding:24px;}
+/* CARDS */
+.cards-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;margin-top:16px;}
+.process-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;position:relative;cursor:pointer;transition:box-shadow .2s,transform .2s;}
+.process-card:hover{box-shadow:0 4px 16px rgba(0,0,0,.1);transform:translateY(-2px);}
+.process-card .sei-num{font-size:.75rem;color:var(--muted);font-weight:600;letter-spacing:.5px;}
+.process-card .titulo{font-weight:600;font-size:.95rem;margin:4px 0 8px;line-height:1.3;}
+.process-card .situacao{font-size:.82rem;color:#374151;background:#f9fafb;border-radius:6px;padding:6px 8px;border-left:3px solid var(--primary);margin-bottom:8px;}
+.process-card .ultimo-and{font-size:.78rem;color:var(--muted);margin-bottom:10px;}
+.card-footer{display:flex;justify-content:space-between;align-items:center;margin-top:8px;}
+.badge-prioridade{font-size:.72rem;font-weight:600;padding:3px 8px;border-radius:20px;}
+.badge-prioridade.Baixa{background:#dcfce7;color:#166534;}
+.badge-prioridade.Media,.badge-prioridade.Média{background:#fef9c3;color:#854d0e;}
+.badge-prioridade.Alta{background:#fee2e2;color:#991b1b;}
+.badge-prioridade.Maxima,.badge-prioridade.Máxima{background:#7c3aed;color:#fff;}
+.badge-status{font-size:.72rem;padding:3px 8px;border-radius:20px;background:#e5e7eb;color:#374151;}
+/* ALERTA VISUAL */
+@keyframes pulse-max{0%,100%{box-shadow:0 0 0 0 rgba(124,58,237,.4);}50%{box-shadow:0 0 0 8px rgba(124,58,237,0);}}
+@keyframes pulse-alt{0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,.3);}50%{box-shadow:0 0 0 6px rgba(220,38,38,0);}}
+@keyframes pulse-med{0%,100%{box-shadow:0 0 0 0 rgba(202,138,4,.3);}50%{box-shadow:0 0 0 5px rgba(202,138,4,0);}}
+.alerta-maxima{border-color:#7c3aed!important;animation:pulse-max 1.2s infinite;}
+.alerta-alta{border-color:#dc2626!important;animation:pulse-alt 1.8s infinite;}
+.alerta-media{border-color:#ca8a04!important;animation:pulse-med 2.5s infinite;}
+/* BUTTONS */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:6px;border:none;cursor:pointer;font-size:.85rem;font-weight:500;transition:background .15s;}
+.btn-primary{background:var(--primary);color:#fff;}
+.btn-primary:hover{background:var(--primary-dark);}
+.btn-success{background:#057a55;color:#fff;}
+.btn-success:hover{background:#046c4e;}
+.btn-warning{background:#c27803;color:#fff;}
+.btn-warning:hover{background:#9f6000;}
+.btn-danger{background:#e02424;color:#fff;}
+.btn-danger:hover{background:#c81e1e;}
+.btn-secondary{background:#e5e7eb;color:#374151;}
+.btn-secondary:hover{background:#d1d5db;}
+.btn-sm{padding:5px 10px;font-size:.78rem;}
+/* MODAL */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px;}
+.modal{background:#fff;border-radius:12px;max-width:860px;width:100%;max-height:90vh;overflow-y:auto;padding:28px;}
+.modal h2{font-size:1.2rem;margin-bottom:20px;}
+/* FORM */
+.form-group{margin-bottom:16px;}
+.form-group label{display:block;font-size:.85rem;font-weight:500;margin-bottom:6px;}
+.form-group input,.form-group select,.form-group textarea{width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:.9rem;color:var(--text);}
+.form-group textarea{resize:vertical;min-height:90px;}
+/* TABS */
+.tabs{display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:20px;}
+.tab{padding:8px 16px;cursor:pointer;font-size:.87rem;border-bottom:2px solid transparent;margin-bottom:-2px;color:var(--muted);}
+.tab.active{border-bottom-color:var(--primary);color:var(--primary);font-weight:600;}
+/* ANDAMENTOS */
+.andamento-item{padding:12px;border-left:3px solid #60a5fa;background:#f0f7ff;border-radius:0 6px 6px 0;margin-bottom:10px;}
+.andamento-item .and-header{font-size:.75rem;color:var(--muted);margin-bottom:4px;}
+.andamento-item .and-body{font-size:.85rem;white-space:pre-wrap;}
+/* ANOTACOES */
+.anotacao-item{padding:10px;border-left:3px solid #a78bfa;background:#faf5ff;border-radius:0 6px 6px 0;margin-bottom:8px;}
+.anotacao-item .anot-header{font-size:.75rem;color:var(--muted);margin-bottom:4px;}
+.anotacao-item .anot-body{font-size:.85rem;white-space:pre-wrap;}
+/* DOCUMENTOS */
+.doc-item{display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--border);border-radius:6px;margin-bottom:8px;}
+.doc-item i{color:var(--primary);font-size:1.1rem;}
+.doc-item .doc-name{flex:1;font-size:.85rem;}
+.doc-item .doc-meta{font-size:.75rem;color:var(--muted);}
+/* IA */
+.ia-box{background:linear-gradient(135deg,#eff6ff,#f0fdf4);border:1px solid #bfdbfe;border-radius:8px;padding:16px;margin-top:16px;}
+.ia-box h4{color:#1e40af;font-size:.9rem;margin-bottom:10px;display:flex;align-items:center;gap:6px;}
+.ia-section{margin-bottom:12px;}
+.ia-section h5{font-size:.8rem;font-weight:600;color:#374151;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;}
+.ia-section p{font-size:.85rem;color:#1f2937;line-height:1.5;}
+/* DRAG DROP */
+.dropzone{border:2px dashed var(--border);border-radius:8px;padding:32px;text-align:center;color:var(--muted);cursor:pointer;transition:border-color .2s,background .2s;}
+.dropzone.over{border-color:var(--primary);background:#eff6ff;}
+.dropzone i{font-size:2rem;margin-bottom:8px;display:block;}
+/* RESUMO GERAL */
+.resumo-geral-box{background:#fff;border:1px solid var(--border);border-radius:10px;padding:18px;margin-bottom:20px;}
+.resumo-geral-box .rg-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
+.resumo-geral-box .rg-header h3{font-size:.95rem;font-weight:600;display:flex;align-items:center;gap:8px;}
+.resumo-geral-box .rg-meta{font-size:.75rem;color:var(--muted);}
+.resumo-geral-box .rg-content{font-size:.87rem;color:#374151;line-height:1.6;white-space:pre-wrap;}
+/* CHAT FLUTUANTE */
+#chat-fab{position:fixed;bottom:24px;right:24px;z-index:900;}
+#chat-btn{width:54px;height:54px;border-radius:50%;background:var(--primary);color:#fff;border:none;cursor:pointer;font-size:1.3rem;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 14px rgba(26,86,219,.4);}
+#chat-panel{position:fixed;bottom:88px;right:24px;width:360px;height:460px;background:#fff;border:1px solid var(--border);border-radius:12px;box-shadow:0 10px 40px rgba(0,0,0,.12);display:none;flex-direction:column;z-index:900;}
+#chat-panel.open{display:flex;}
+#chat-header{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:.9rem;}
+#chat-msgs{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;}
+.chat-msg{max-width:85%;padding:8px 12px;border-radius:8px;font-size:.83rem;line-height:1.4;}
+.chat-msg.user{background:var(--primary);color:#fff;align-self:flex-end;border-bottom-right-radius:2px;}
+.chat-msg.ai{background:#f3f4f6;color:#1f2937;align-self:flex-start;border-bottom-left-radius:2px;}
+#chat-input-row{padding:10px 12px;border-top:1px solid var(--border);display:flex;gap:8px;}
+#chat-input{flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:.83rem;}
+/* LOGIN */
+#login-screen{display:flex;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(135deg,#1e3a5f,#1a56db);}
+.login-card{background:#fff;border-radius:14px;padding:36px;width:380px;box-shadow:0 20px 60px rgba(0,0,0,.2);}
+.login-card h2{text-align:center;margin-bottom:6px;font-size:1.4rem;}
+.login-card .subtitle{text-align:center;color:var(--muted);font-size:.85rem;margin-bottom:24px;}
+/* UPLOAD PROGRESS */
+.upload-progress{margin-top:8px;}
+.up-item{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f3f4f6;font-size:.82rem;}
+.up-item i{width:16px;text-align:center;}
+.up-item .up-name{flex:1;}
+.up-ok{color:#057a55;}
+.up-dup{color:var(--muted);}
+.up-err{color:var(--danger);}
+.up-proc{color:var(--primary);}
+/* MISC */
+.alert{padding:10px 14px;border-radius:6px;font-size:.85rem;margin-bottom:12px;}
+.alert-info{background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;}
+.alert-success{background:#f0fdf4;color:#166534;border:1px solid #bbf7d0;}
+.alert-warning{background:#fffbeb;color:#92400e;border:1px solid #fde68a;}
+.alert-danger{background:#fef2f2;color:#991b1b;border:1px solid #fecaca;}
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.hidden{display:none!important;}
+.text-muted{color:var(--muted);}
+.mt-2{margin-top:8px;}
+.mt-4{margin-top:16px;}
+.flex{display:flex;}
+.gap-2{gap:8px;}
+.items-center{align-items:center;}
+.justify-between{justify-content:space-between;}
+hr.divider{border:none;border-top:1px solid var(--border);margin:16px 0;}
+/* WIZARD STEPS */
+.wizard-steps{display:flex;gap:0;margin-bottom:24px;}
+.wizard-step{flex:1;padding:8px;text-align:center;font-size:.78rem;color:var(--muted);border-bottom:3px solid var(--border);position:relative;}
+.wizard-step.done{color:var(--success);border-bottom-color:var(--success);}
+.wizard-step.active{color:var(--primary);border-bottom-color:var(--primary);font-weight:600;}
+/* ADMIN TABLE */
+.admin-table{width:100%;border-collapse:collapse;font-size:.85rem;}
+.admin-table th{text-align:left;padding:8px 10px;border-bottom:2px solid var(--border);font-size:.78rem;color:var(--muted);text-transform:uppercase;}
+.admin-table td{padding:8px 10px;border-bottom:1px solid var(--border);}
+.admin-table tr:hover td{background:#f9fafb;}
 </style>
 </head>
 <body>
+<!-- LOGIN -->
+<div id="login-screen">
+<div class="login-card">
+  <h2>🗂 SEI Monitor</h2>
+  <p class="subtitle">Sistema de Monitoramento de Processos v2.0</p>
+  <div class="form-group">
+    <label>URL do Apps Script</label>
+    <input type="url" id="api-url-input" placeholder="https://script.google.com/macros/s/.../exec" style="font-size:.78rem;">
+  </div>
+  <div class="form-group">
+    <label>Email</label>
+    <input type="email" id="login-email" placeholder="seu@email.com">
+  </div>
+  <div class="form-group">
+    <label>Senha</label>
+    <input type="password" id="login-senha">
+  </div>
+  <div id="login-error" class="alert alert-danger hidden"></div>
+  <button class="btn btn-primary" style="width:100%;justify-content:center;" onclick="fazerLogin()">
+    <i class="fa fa-sign-in-alt"></i> Entrar
+  </button>
+</div>
+</div>
 
-<!-- ===================== LOGIN ===================== -->
-<div id="view-login">
-  <div class="login-box">
-    <div class="logo-login">SEI<span>Monitor</span></div>
-    <p>Sistema de Monitoramento de Processos</p>
-    <div class="form-group">
-      <label>Email</label>
-      <input type="email" id="login-email" placeholder="seu@email.com"/>
+<!-- APP -->
+<div id="app" class="hidden" style="display:flex;flex:1;height:100vh;">
+<div id="sidebar">
+  <div class="logo">SEI <span>Monitor</span></div>
+  <nav>
+    <a onclick="showView('dashboard')" id="nav-dashboard"><i class="fa fa-th-large"></i>Dashboard</a>
+    <a onclick="showView('novo')" id="nav-novo"><i class="fa fa-plus-circle"></i>Novo Processo</a>
+    <a onclick="showView('admin')" id="nav-admin" class="hidden"><i class="fa fa-cog"></i>Administração</a>
+  </nav>
+  <div class="ai-status">
+    <span class="ai-dot" id="ai-dot"></span><span id="ai-status-txt">Verificando IA...</span>
+  </div>
+  <div class="user-info">
+    <strong id="sidebar-nome">—</strong>
+    <span id="sidebar-email"></span><br>
+    <a href="#" onclick="logout()" style="color:#60a5fa;font-size:.75rem;">Sair</a>
+  </div>
+</div>
+
+<div id="main">
+  <div id="topbar">
+    <h1 id="page-title">Dashboard</h1>
+    <div class="actions">
+      <input type="text" id="search-input" placeholder="🔍 Buscar processo..." style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:.85rem;width:220px;" oninput="filtrarCards()">
+      <button class="btn btn-primary" onclick="showView('novo')"><i class="fa fa-plus"></i> Novo</button>
     </div>
-    <div class="form-group">
-      <label>Senha</label>
-      <input type="password" id="login-senha" placeholder="••••••••"/>
+  </div>
+  <div id="content"></div>
+</div>
+</div>
+
+<!-- CHAT FAB -->
+<div id="chat-fab">
+  <button id="chat-btn" onclick="toggleChat()" title="Assistente IA"><i class="fa fa-robot"></i></button>
+  <div id="chat-panel">
+    <div id="chat-header">
+      <span><i class="fa fa-robot" style="color:var(--primary);margin-right:6px;"></i>Assistente IA</span>
+      <button onclick="toggleChat()" style="background:none;border:none;cursor:pointer;font-size:1rem;">✕</button>
     </div>
-    <button class="btn btn-primary" style="width:100%;padding:12px" onclick="doLogin()">
-      <i class="fas fa-sign-in-alt"></i> Entrar
-    </button>
-    <div id="login-erro" style="color:var(--danger);font-size:13px;margin-top:12px;display:none"></div>
-    <div class="api-config">
-      <label>URL do Apps Script (configure uma vez)</label>
-      <input type="text" id="api-url-input" placeholder="https://script.google.com/macros/s/.../exec"
-             value="" oninput="localStorage.setItem('sei_api_url',this.value)"/>
-      <p style="font-size:11px;color:var(--text2);margin-top:6px">Esta URL é salva localmente no seu navegador.</p>
+    <div id="chat-msgs"><div class="chat-msg ai">Olá! Posso responder perguntas sobre os processos monitorados. Como posso ajudar?</div></div>
+    <div id="chat-input-row">
+      <input id="chat-input" placeholder="Digite sua pergunta..." onkeydown="if(event.key==='Enter')enviarChat()">
+      <button class="btn btn-primary btn-sm" onclick="enviarChat()"><i class="fa fa-paper-plane"></i></button>
     </div>
   </div>
 </div>
 
-<!-- ===================== APP SHELL ===================== -->
-<div id="app-shell" class="hidden">
-  <!-- SIDEBAR -->
-  <aside id="sidebar">
-    <div class="logo">SEI<span>Monitor</span></div>
-    <nav>
-      <a href="#" onclick="navTo('dashboard')" id="nav-dashboard"><i class="fas fa-th-large"></i> Dashboard</a>
-      <a href="#" onclick="navTo('novo-processo')" id="nav-novo"><i class="fas fa-plus-circle"></i> Novo Processo</a>
-      <a href="#" onclick="navTo('admin')" id="nav-admin" class="hidden"><i class="fas fa-users-cog"></i> Administração</a>
-    </nav>
-    <div class="user-box">
-      <strong id="sidebar-nome">Usuário</strong>
-      <span id="sidebar-email" style="font-size:12px"></span>
-      <div style="margin-top:6px" id="ollama-status">
-        <span id="ollama-dot"></span>
-        <span id="ollama-txt">Verificando IA...</span>
-      </div>
-      <button class="logout-btn" onclick="doLogout()"><i class="fas fa-sign-out-alt"></i> Sair</button>
-    </div>
-  </aside>
-
-  <!-- MAIN -->
-  <main id="main">
-    <div id="topbar">
-      <h1 id="topbar-title">Dashboard</h1>
-      <div style="display:flex;gap:10px;align-items:center">
-        <button class="btn btn-ghost btn-sm" onclick="recarregarProcessos()"><i class="fas fa-sync-alt"></i></button>
-      </div>
-    </div>
-    <div id="content">
-
-      <!-- DASHBOARD -->
-      <div id="view-dashboard">
-        <div class="stats-grid" id="stats-grid"></div>
-        <div class="filter-bar">
-          <input type="text" placeholder="🔍 Buscar por número, título ou categoria..." id="filtro-busca" oninput="filtrarProcessos()"/>
-          <select id="filtro-status" onchange="filtrarProcessos()">
-            <option value="">Todos os status</option>
-            <option>Em andamento</option>
-            <option>Aguardando</option>
-            <option>Concluído</option>
-            <option>Arquivado</option>
-          </select>
-          <select id="filtro-prioridade" onchange="filtrarProcessos()">
-            <option value="">Todas as prioridades</option>
-            <option>Máxima</option>
-            <option>Alta</option>
-            <option>Média</option>
-            <option>Baixa</option>
-          </select>
-        </div>
-        <div id="processos-grid" class="processos-grid"></div>
-      </div>
-
-      <!-- DETALHE PROCESSO -->
-      <div id="view-processo" class="hidden">
-        <div class="proc-detail-header">
-          <div>
-            <button class="btn btn-ghost btn-sm" onclick="navTo('dashboard')" style="margin-bottom:12px">
-              <i class="fas fa-arrow-left"></i> Voltar
-            </button>
-            <h2 id="det-sei"></h2>
-            <div class="meta" id="det-meta"></div>
-          </div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="btn btn-primary btn-sm" onclick="abrirModalAtualizar()"><i class="fas fa-edit"></i> Atualizar</button>
-            <button class="btn btn-ghost btn-sm" onclick="reanalizar()"><i class="fas fa-robot"></i> Re-analisar IA</button>
-          </div>
-        </div>
-        <div class="tabs">
-          <button class="tab-btn active" onclick="abaAtiva('resumo', this)"><i class="fas fa-file-alt"></i> Resumo IA</button>
-          <button class="tab-btn" onclick="abaAtiva('docs', this)"><i class="fas fa-paperclip"></i> Documentos</button>
-          <button class="tab-btn" onclick="abaAtiva('andamentos', this)"><i class="fas fa-history"></i> Andamentos</button>
-          <button class="tab-btn" onclick="abaAtiva('anotacoes', this)"><i class="fas fa-sticky-note"></i> Anotações</button>
-        </div>
-
-        <!-- ABA RESUMO -->
-        <div id="tab-resumo" class="tab-content active">
-          <div id="ia-loading" class="ai-progress hidden">
-            <div class="spinner">⚙️</div>
-            <div id="ia-etapa">Iniciando análise...</div>
-            <div class="progress-bar"><div class="progress-fill" id="ia-progress-fill" style="width:0%"></div></div>
-          </div>
-          <div id="ia-sem-ollama" class="hidden" style="padding:20px;background:rgba(239,68,68,.1);border:1px solid var(--danger);border-radius:var(--radius);margin-bottom:16px;font-size:14px;color:#fca5a5">
-            <i class="fas fa-exclamation-triangle"></i> Ollama não detectado nesta máquina. Instale e configure conforme o guia de instalação para habilitar análise por IA.
-          </div>
-          <div class="grid-2">
-            <div>
-              <div class="ia-box">
-                <h4><i class="fas fa-align-left" style="color:var(--accent)"></i> Resumo do Processo</h4>
-                <div class="ia-text" id="det-resumo">—</div>
-              </div>
-              <div class="ia-box">
-                <h4><i class="fas fa-route" style="color:var(--success)"></i> Próximos Passos</h4>
-                <div class="ia-text" id="det-proximos">—</div>
-              </div>
-            </div>
-            <div>
-              <div class="ia-box">
-                <h4><i class="fas fa-search" style="color:var(--media)"></i> Apontamentos</h4>
-                <div class="ia-text" id="det-apontamentos">—</div>
-              </div>
-              <div class="ia-box">
-                <h4><i class="fas fa-lightbulb" style="color:var(--alta)"></i> Sugestões</h4>
-                <div class="ia-text" id="det-sugestoes">—</div>
-              </div>
-            </div>
-          </div>
-          <div class="ia-box" id="similares-box">
-            <h4><i class="fas fa-code-branch" style="color:var(--text2)"></i> Processos Similares</h4>
-            <div id="similares-lista"></div>
-          </div>
-        </div>
-
-        <!-- ABA DOCS -->
-        <div id="tab-docs" class="tab-content">
-          <div class="section-header">
-            <h3>Documentos</h3>
-            <button class="btn btn-primary btn-sm" onclick="abrirModalDocs()"><i class="fas fa-upload"></i> Adicionar Documentos</button>
-          </div>
-          <div id="docs-lista"></div>
-        </div>
-
-        <!-- ABA ANDAMENTOS -->
-        <div id="tab-andamentos" class="tab-content">
-          <div class="section-header">
-            <h3>Andamentos</h3>
-            <button class="btn btn-primary btn-sm" onclick="abrirModalAndamento()"><i class="fas fa-plus"></i> Indexar Andamento</button>
-          </div>
-          <div id="andamentos-lista"></div>
-        </div>
-
-        <!-- ABA ANOTAÇÕES -->
-        <div id="tab-anotacoes" class="tab-content">
-          <div class="section-header">
-            <h3>Anotações da Equipe</h3>
-            <button class="btn btn-primary btn-sm" onclick="abrirModalAnotacao()"><i class="fas fa-plus"></i> Nova Anotação</button>
-          </div>
-          <div id="anotacoes-lista"></div>
-        </div>
-      </div>
-
-      <!-- NOVO PROCESSO -->
-      <div id="view-novo-processo" class="hidden">
-        <div class="steps-bar" id="steps-bar">
-          <div class="step-item" id="step-1"><div class="step-num">1</div><br>Identificação</div>
-          <div class="step-item" id="step-2"><div class="step-num">2</div><br>Documentos</div>
-          <div class="step-item" id="step-3"><div class="step-num">3</div><br>Andamento</div>
-          <div class="step-item" id="step-4"><div class="step-num">4</div><br>Análise IA</div>
-          <div class="step-item" id="step-5"><div class="step-num">5</div><br>Prioridade</div>
-        </div>
-
-        <!-- Step 1 -->
-        <div id="np-step1" class="card">
-          <h3 style="margin-bottom:18px"><i class="fas fa-hashtag"></i> Número do Processo SEI</h3>
-          <div class="form-group">
-            <label>Número SEI *</label>
-            <input type="text" id="np-sei" placeholder="Ex: 00000.000001/2024-01"/>
-          </div>
-          <div class="form-group">
-            <label>Título / Assunto</label>
-            <input type="text" id="np-titulo" placeholder="Descrição breve do processo"/>
-          </div>
-          <div style="text-align:right;margin-top:16px">
-            <button class="btn btn-primary" onclick="npStep2()">Próximo <i class="fas fa-arrow-right"></i></button>
-          </div>
-        </div>
-
-        <!-- Step 2 -->
-        <div id="np-step2" class="card hidden">
-          <h3 style="margin-bottom:18px"><i class="fas fa-folder-open"></i> Documentos do Processo</h3>
-          <p style="font-size:13px;color:var(--text2);margin-bottom:14px">
-            Arraste todos os arquivos da pasta do processo ou clique para selecionar. ZIP será extraído automaticamente.
-            Arquivos já cadastrados serão ignorados automaticamente.
-          </p>
-          <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
-            <i class="fas fa-cloud-upload-alt"></i>
-            <p>Arraste arquivos aqui ou clique para selecionar</p>
-            <p style="font-size:12px;margin-top:6px">PDF, Word, Excel, ZIP — até 20MB por arquivo</p>
-          </div>
-          <input type="file" id="file-input" multiple style="display:none" accept=".pdf,.doc,.docx,.xls,.xlsx,.zip,.txt"
-                 onchange="handleFiles(this.files)"/>
-          <div id="file-list-preview" class="file-list-preview"></div>
-          <div style="display:flex;justify-content:space-between;margin-top:16px">
-            <button class="btn btn-ghost" onclick="npGoStep(1)"><i class="fas fa-arrow-left"></i> Voltar</button>
-            <button class="btn btn-primary" onclick="npStep3()">Próximo <i class="fas fa-arrow-right"></i></button>
-          </div>
-        </div>
-
-        <!-- Step 3 -->
-        <div id="np-step3" class="card hidden">
-          <h3 style="margin-bottom:18px"><i class="fas fa-clipboard-list"></i> Andamento do Processo</h3>
-          <p style="font-size:13px;color:var(--text2);margin-bottom:14px">
-            Cole o histórico de andamentos copiado do SEI. O sistema identifica e ignora automaticamente entradas já cadastradas.
-          </p>
-          <div class="form-group">
-            <label>Andamentos (cole o texto do SEI)</label>
-            <textarea id="np-andamento" rows="10" placeholder="29/07/2026 14:32:15  Usuário  Descrição do movimento&#10;28/07/2026 10:00:00  Usuário  Outra movimentação"></textarea>
-          </div>
-          <div style="display:flex;justify-content:space-between;margin-top:16px">
-            <button class="btn btn-ghost" onclick="npGoStep(2)"><i class="fas fa-arrow-left"></i> Voltar</button>
-            <button class="btn btn-primary" onclick="npStep4()">Analisar com IA <i class="fas fa-robot"></i></button>
-          </div>
-        </div>
-
-        <!-- Step 4 - IA -->
-        <div id="np-step4" class="card hidden">
-          <h3 style="margin-bottom:18px"><i class="fas fa-robot"></i> Análise Inteligente</h3>
-          <div class="ai-progress" id="np-ia-progress">
-            <div class="spinner">⚙️</div>
-            <div id="np-ia-etapa">Iniciando...</div>
-            <div class="progress-bar"><div class="progress-fill" id="np-progress-fill" style="width:0%"></div></div>
-          </div>
-          <div id="np-ia-resultado" class="hidden">
-            <div class="grid-2" style="margin-top:16px">
-              <div>
-                <div class="ia-box">
-                  <h4>Categoria</h4>
-                  <div id="np-categoria-ia"></div>
-                  <input type="text" id="np-categoria-edit" placeholder="Editar categoria..." style="margin-top:8px"/>
-                </div>
-                <div class="ia-box">
-                  <h4>Resumo</h4>
-                  <div class="ia-text" id="np-resumo-ia"></div>
-                </div>
-              </div>
-              <div>
-                <div class="ia-box">
-                  <h4>Apontamentos</h4>
-                  <div class="ia-text" id="np-apontamentos-ia"></div>
-                </div>
-                <div class="ia-box">
-                  <h4>Sugestões / Próximos Passos</h4>
-                  <div class="ia-text" id="np-sugestoes-ia"></div>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div id="np-sem-ia" class="hidden" style="padding:20px;text-align:center;color:var(--text2)">
-            <i class="fas fa-exclamation-circle" style="font-size:30px;margin-bottom:10px;color:var(--alta)"></i>
-            <p>Ollama não disponível. O processo será criado sem análise IA. Você pode re-analisar depois quando o Ollama estiver ativo.</p>
-          </div>
-          <div style="display:flex;justify-content:space-between;margin-top:16px">
-            <button class="btn btn-ghost" onclick="npGoStep(3)"><i class="fas fa-arrow-left"></i> Voltar</button>
-            <button class="btn btn-primary" id="btn-step5" onclick="npStep5()" disabled><i class="fas fa-arrow-right"></i> Definir Prioridade</button>
-          </div>
-        </div>
-
-        <!-- Step 5 - Prioridade -->
-        <div id="np-step5" class="card hidden">
-          <h3 style="margin-bottom:18px"><i class="fas fa-flag"></i> Prioridade do Processo</h3>
-          <div style="display:grid;gap:12px">
-            <label class="prio-option" data-prio="Máxima">
-              <input type="radio" name="prioridade" value="Máxima"/>
-              <div style="padding:16px;background:var(--bg3);border:2px solid transparent;border-radius:var(--radius);cursor:pointer;transition:all .2s">
-                <div style="display:flex;align-items:center;gap:10px">
-                  <span class="badge badge-maxima"><i class="fas fa-fire"></i> Máxima</span>
-                  <span style="font-size:14px">Alerta a cada <strong>2 horas</strong> sem atualização</span>
-                </div>
-              </div>
-            </label>
-            <label class="prio-option" data-prio="Alta">
-              <input type="radio" name="prioridade" value="Alta"/>
-              <div style="padding:16px;background:var(--bg3);border:2px solid transparent;border-radius:var(--radius);cursor:pointer;transition:all .2s">
-                <div style="display:flex;align-items:center;gap:10px">
-                  <span class="badge badge-alta"><i class="fas fa-exclamation-circle"></i> Alta</span>
-                  <span style="font-size:14px">Alerta a cada <strong>2 dias</strong> sem atualização</span>
-                </div>
-              </div>
-            </label>
-            <label class="prio-option" data-prio="Média">
-              <input type="radio" name="prioridade" value="Média" checked/>
-              <div style="padding:16px;background:var(--bg3);border:2px solid transparent;border-radius:var(--radius);cursor:pointer;transition:all .2s">
-                <div style="display:flex;align-items:center;gap:10px">
-                  <span class="badge badge-media"><i class="fas fa-minus-circle"></i> Média</span>
-                  <span style="font-size:14px">Alerta a cada <strong>3 dias</strong> sem atualização</span>
-                </div>
-              </div>
-            </label>
-            <label class="prio-option" data-prio="Baixa">
-              <input type="radio" name="prioridade" value="Baixa"/>
-              <div style="padding:16px;background:var(--bg3);border:2px solid transparent;border-radius:var(--radius);cursor:pointer;transition:all .2s">
-                <div style="display:flex;align-items:center;gap:10px">
-                  <span class="badge badge-baixa"><i class="fas fa-arrow-down"></i> Baixa</span>
-                  <span style="font-size:14px">Alerta a cada <strong>5 dias</strong> sem atualização</span>
-                </div>
-              </div>
-            </label>
-          </div>
-          <div style="display:flex;justify-content:space-between;margin-top:20px">
-            <button class="btn btn-ghost" onclick="npGoStep(4)"><i class="fas fa-arrow-left"></i> Voltar</button>
-            <button class="btn btn-success" onclick="npFinalizar()"><i class="fas fa-check"></i> Cadastrar Processo</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- ADMIN -->
-      <div id="view-admin" class="hidden">
-        <div class="section-header" style="margin-bottom:20px">
-          <h3>Gestão de Usuários</h3>
-          <button class="btn btn-primary btn-sm" onclick="abrirModalCriarUsuario()"><i class="fas fa-user-plus"></i> Novo Usuário</button>
-        </div>
-        <div class="card" style="padding:0;overflow:hidden">
-          <table class="users-table">
-            <thead><tr>
-              <th>Nome</th><th>Email</th><th>Perfil</th><th>Status</th><th>Último Acesso</th><th>Ações</th>
-            </tr></thead>
-            <tbody id="users-tbody"></tbody>
-          </table>
-        </div>
-
-        <div style="margin-top:28px">
-          <div class="section-header"><h3>Configurações do Sistema</h3></div>
-          <div class="card">
-            <div class="form-group">
-              <label><i class="fab fa-google-drive"></i> ID da Pasta no Google Drive</label>
-              <input type="text" id="cfg-drive-folder" placeholder="ID da pasta onde os documentos serão salvos"/>
-            </div>
-            <div class="form-group">
-              <label><i class="fas fa-balance-scale"></i> ID do Documento Legal (Word no Drive)</label>
-              <input type="text" id="cfg-legal-doc" placeholder="ID do documento com instrumentos legais"/>
-            </div>
-            <button class="btn btn-primary" onclick="salvarConfigs()"><i class="fas fa-save"></i> Salvar Configurações</button>
-          </div>
-        </div>
-      </div>
-
-    </div><!-- /content -->
-  </main>
-</div><!-- /app-shell -->
-
-<!-- ===================== MODALS ===================== -->
-
-<!-- Modal Atualizar Processo -->
-<div id="modal-atualizar" class="modal-overlay hidden">
-  <div class="modal-box">
-    <div class="modal-header">
-      <h3>Atualizar Processo</h3>
-      <button class="close-btn" onclick="fecharModal('modal-atualizar')">×</button>
-    </div>
-    <div class="modal-body">
-      <div class="form-group">
-        <label>Título / Assunto</label>
-        <input type="text" id="upd-titulo"/>
-      </div>
-      <div class="form-group">
-        <label>Categoria</label>
-        <input type="text" id="upd-categoria"/>
-      </div>
-      <div class="form-group">
-        <label>Status</label>
-        <select id="upd-status">
-          <option>Em andamento</option>
-          <option>Aguardando</option>
-          <option>Concluído</option>
-          <option>Arquivado</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>Prioridade</label>
-        <select id="upd-prioridade">
-          <option>Máxima</option><option>Alta</option><option>Média</option><option>Baixa</option>
-        </select>
-      </div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="fecharModal('modal-atualizar')">Cancelar</button>
-      <button class="btn btn-primary" onclick="salvarAtualizacao()">Salvar</button>
-    </div>
-  </div>
-</div>
-
-<!-- Modal Documentos -->
-<div id="modal-docs" class="modal-overlay hidden">
-  <div class="modal-box" style="max-width:600px">
-    <div class="modal-header">
-      <h3>Adicionar Documentos</h3>
-      <button class="close-btn" onclick="fecharModal('modal-docs')">×</button>
-    </div>
-    <div class="modal-body">
-      <div class="drop-zone" id="drop-zone-modal" onclick="document.getElementById('file-input-modal').click()">
-        <i class="fas fa-cloud-upload-alt"></i>
-        <p>Arraste arquivos ou clique para selecionar</p>
-      </div>
-      <input type="file" id="file-input-modal" multiple style="display:none"
-             accept=".pdf,.doc,.docx,.xls,.xlsx,.zip,.txt"
-             onchange="handleFilesModal(this.files)"/>
-      <div id="file-list-modal" class="file-list-preview" style="margin-top:10px"></div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="fecharModal('modal-docs')">Fechar</button>
-      <button class="btn btn-primary" onclick="uploadDocumentosModal()"><i class="fas fa-upload"></i> Enviar ao Drive</button>
-    </div>
-  </div>
-</div>
-
-<!-- Modal Andamento -->
-<div id="modal-andamento" class="modal-overlay hidden">
-  <div class="modal-box">
-    <div class="modal-header">
-      <h3>Indexar Andamento</h3>
-      <button class="close-btn" onclick="fecharModal('modal-andamento')">×</button>
-    </div>
-    <div class="modal-body">
-      <p style="font-size:13px;color:var(--text2);margin-bottom:12px">Cole o texto do andamento copiado do SEI. Entradas já indexadas serão automaticamente ignoradas.</p>
-      <div class="form-group">
-        <label>Texto do Andamento</label>
-        <textarea id="upd-andamento" rows="10" placeholder="Cole aqui o andamento copiado do SEI..."></textarea>
-      </div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="fecharModal('modal-andamento')">Cancelar</button>
-      <button class="btn btn-primary" onclick="salvarAndamento()">Indexar</button>
-    </div>
-  </div>
-</div>
-
-<!-- Modal Anotação -->
-<div id="modal-anotacao" class="modal-overlay hidden">
-  <div class="modal-box">
-    <div class="modal-header">
-      <h3>Nova Anotação</h3>
-      <button class="close-btn" onclick="fecharModal('modal-anotacao')">×</button>
-    </div>
-    <div class="modal-body">
-      <div class="form-group">
-        <label>Observação / Informação Importante</label>
-        <textarea id="nova-anotacao" rows="6" placeholder="Descreva sua observação, ação tomada ou informação relevante..."></textarea>
-      </div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="fecharModal('modal-anotacao')">Cancelar</button>
-      <button class="btn btn-primary" onclick="salvarAnotacao()">Registrar</button>
-    </div>
-  </div>
-</div>
-
-<!-- Modal Criar Usuário -->
-<div id="modal-criar-usuario" class="modal-overlay hidden">
-  <div class="modal-box">
-    <div class="modal-header">
-      <h3>Novo Usuário</h3>
-      <button class="close-btn" onclick="fecharModal('modal-criar-usuario')">×</button>
-    </div>
-    <div class="modal-body">
-      <div class="form-group"><label>Nome *</label><input type="text" id="nu-nome"/></div>
-      <div class="form-group"><label>Email *</label><input type="email" id="nu-email"/></div>
-      <div class="form-group"><label>Senha *</label><input type="password" id="nu-senha"/></div>
-      <div class="form-group">
-        <label>Perfil *</label>
-        <select id="nu-perfil"><option value="usuario">Usuário</option><option value="admin">Admin</option></select>
-      </div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="fecharModal('modal-criar-usuario')">Cancelar</button>
-      <button class="btn btn-primary" onclick="criarUsuario()">Criar</button>
-    </div>
-  </div>
-</div>
-
-<!-- Modal Reset Senha -->
-<div id="modal-reset-senha" class="modal-overlay hidden">
-  <div class="modal-box">
-    <div class="modal-header">
-      <h3>Redefinir Senha</h3>
-      <button class="close-btn" onclick="fecharModal('modal-reset-senha')">×</button>
-    </div>
-    <div class="modal-body">
-      <p style="font-size:14px;color:var(--text2);margin-bottom:14px">Definir nova senha para: <strong id="reset-nome-label"></strong></p>
-      <div class="form-group"><label>Nova Senha *</label><input type="password" id="reset-nova-senha"/></div>
-      <input type="hidden" id="reset-user-id"/>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="fecharModal('modal-reset-senha')">Cancelar</button>
-      <button class="btn btn-primary" onclick="confirmarResetSenha()">Redefinir</button>
-    </div>
-  </div>
-</div>
-
-<!-- ===================== CHAT FLUTUANTE ===================== -->
-<button id="chat-fab" onclick="toggleChat()" title="Assistente IA">
-  <i class="fas fa-robot"></i>
-  <div class="chat-notif hidden" id="chat-notif"></div>
-</button>
-
-<div id="chat-panel" class="hidden">
-  <div class="chat-header">
-    <div class="chat-ai-icon"><i class="fas fa-robot"></i></div>
-    <div class="chat-header-text">
-      <h4>Assistente SEI</h4>
-      <p id="chat-status-txt">Pronto para ajudar</p>
-    </div>
-    <button onclick="toggleChat()" style="background:none;border:none;color:var(--text2);font-size:16px;margin-left:auto;cursor:pointer">×</button>
-  </div>
-  <div id="chat-messages">
-    <div class="msg msg-ai">Olá! Sou o assistente SEI. Pergunte sobre qualquer processo cadastrado — posso resumir, comparar, ou ajudar com próximos passos. 🤖</div>
-  </div>
-  <div class="chat-input-area">
-    <input type="text" id="chat-input" placeholder="Pergunte sobre processos..." onkeydown="if(event.key==='Enter')enviarChat()"/>
-    <button onclick="enviarChat()"><i class="fas fa-paper-plane"></i></button>
-  </div>
-</div>
-
-<!-- Toast container -->
-<div id="toast-container"></div>
-
-<!-- ===================== JAVASCRIPT ===================== -->
 <script>
-// ============================================================
-// CONFIGURAÇÃO
-// ============================================================
-let API_URL = localStorage.getItem('sei_api_url') || '';
-const OLLAMA_URL = 'http://localhost:11434';
-const OLLAMA_MODEL = localStorage.getItem('ollama_model') || 'llama3.2:3b';
+// ==================== CONFIG ====================
+const LIMITE_HORAS = { 'Máxima': 2, 'Alta': 24, 'Média': 48, 'Baixa': 96 };
+const OLLAMA_URL = 'http://localhost:11434/api/generate';
+let OLLAMA_MODEL = localStorage.getItem('ollama_model') || 'llama3.2:3b';
+const BLOCO_MAX = 49000;
+const RELEVANCIA_MAX_CHARS = 25000;
 
-// ============================================================
-// ESTADO DA APLICAÇÃO
-// ============================================================
-const S = {
-  token:      localStorage.getItem('sei_token') || null,
-  user:       JSON.parse(localStorage.getItem('sei_user') || 'null'),
-  processos:  [],
-  processoAtual: null,
-  docsAtual:  [],
-  andamentosAtual: [],
-  anotacoesAtual: [],
-  ollamaOk:   false,
-  legalDoc:   '',
-  npFiles:    [],        // arquivos no novo processo
-  npModalFiles: [],      // arquivos no modal de docs
-  npIAResult: null,
-  modalDocsTargetSei: null,
-  alertTimers: {}
+// ==================== STATE ====================
+let API_URL = '';
+let sessao = null;
+let usuarioAtual = null;
+let todosProcessos = [];
+
+// ==================== INIT ====================
+window.onload = () => {
+  API_URL = localStorage.getItem('sei_api_url') || '';
+  if (API_URL) document.getElementById('api-url-input').value = API_URL;
+  verificarOllama();
 };
 
-// ============================================================
-// API LAYER
-// ============================================================
-async function api(path, method = 'GET', data = null) {
-  API_URL = localStorage.getItem('sei_api_url') || '';
-  if (!API_URL) { toast('Configure a URL da API nas configurações de login', 'error'); throw new Error('API URL não configurada'); }
-
-  let url = `${API_URL}?path=${encodeURIComponent(path)}`;
-  if (S.token) url += `&token=${encodeURIComponent(S.token)}`;
-
-  const opts = { method, redirect: 'follow' };
-
-  if (method === 'GET' && data) {
-    Object.entries(data).forEach(([k,v]) => { url += `&${encodeURIComponent(k)}=${encodeURIComponent(v)}`; });
-  } else if (method === 'POST' && data) {
-    const payload = { ...data };
-    if (S.token) payload.token = S.token;
-    opts.headers = { 'Content-Type': 'text/plain;charset=utf-8' };
-    opts.body = JSON.stringify(payload);
+// ==================== API ====================
+async function api(path, body = null, method = 'GET') {
+  const url = API_URL + (API_URL.includes('?') ? '&' : '?') + 'path=' + encodeURIComponent(path);
+  const opts = { method: body ? 'POST' : 'GET', redirect: 'follow' };
+  if (body) {
+    opts.method = 'POST';
+    opts.headers = { 'Content-Type': 'text/plain' };
+    opts.body = JSON.stringify({ ...body, token: sessao?.token });
   }
-
-  const res = await fetch(url, opts);
-  const text = await res.text();
-  try { return JSON.parse(text); }
-  catch(e) { console.error('API parse error', text); return { sucesso: false, erro: 'Resposta inválida da API' }; }
+  const r = await fetch(url, opts);
+  const text = await r.text();
+  try { return JSON.parse(text); } catch { return { ok: false, erro: text }; }
 }
 
-// ============================================================
-// AUTENTICAÇÃO
-// ============================================================
-async function doLogin() {
+// ==================== AUTH ====================
+async function fazerLogin() {
+  const urlInput = document.getElementById('api-url-input').value.trim();
   const email = document.getElementById('login-email').value.trim();
   const senha = document.getElementById('login-senha').value;
-  const erro = document.getElementById('login-erro');
-  API_URL = document.getElementById('api-url-input').value.trim();
+  const errEl = document.getElementById('login-error');
+  errEl.classList.add('hidden');
+  if (!urlInput) { errEl.textContent = 'Informe a URL do Apps Script.'; errEl.classList.remove('hidden'); return; }
+  API_URL = urlInput;
   localStorage.setItem('sei_api_url', API_URL);
-
-  if (!API_URL) { erro.textContent = 'Informe a URL do Apps Script.'; erro.style.display='block'; return; }
-  if (!email || !senha) { erro.textContent = 'Preencha email e senha.'; erro.style.display='block'; return; }
-
-  erro.style.display = 'none';
-  const r = await api('auth/login', 'POST', { email, senha });
-  if (!r.sucesso) { erro.textContent = r.erro || 'Erro no login'; erro.style.display='block'; return; }
-
-  S.token = r.token;
-  S.user  = r.usuario;
-  localStorage.setItem('sei_token', r.token);
-  localStorage.setItem('sei_user', JSON.stringify(r.usuario));
+  const senhaHash = await sha256(senha);
+  const res = await api('auth/login', { email, senha: senhaHash });
+  if (!res.ok) { errEl.textContent = res.erro || 'Credenciais inválidas.'; errEl.classList.remove('hidden'); return; }
+  sessao = res.sessao;
+  usuarioAtual = res.usuario;
   iniciarApp();
+  api('log/registrar', { acao: 'LOGIN', detalhes: 'Login realizado' });
 }
 
-async function doLogout() {
-  await api('auth/logout', 'POST', {});
-  S.token = null; S.user = null;
-  localStorage.removeItem('sei_token');
-  localStorage.removeItem('sei_user');
-  document.getElementById('app-shell').classList.add('hidden');
-  document.getElementById('view-login').classList.remove('hidden');
+function logout() {
+  if (sessao) api('auth/logout', { token: sessao.token });
+  sessao = null; usuarioAtual = null;
+  document.getElementById('app').classList.add('hidden');
+  document.getElementById('login-screen').style.display = '';
 }
-
-// ============================================================
-// INICIALIZAÇÃO
-// ============================================================
-window.addEventListener('load', async () => {
-  document.getElementById('api-url-input').value = localStorage.getItem('sei_api_url') || '';
-
-  if (S.token && S.user) {
-    const me = await api('auth/me');
-    if (me.sucesso) { iniciarApp(); return; }
-    localStorage.removeItem('sei_token');
-    localStorage.removeItem('sei_user');
-    S.token = null; S.user = null;
-  }
-
-  document.getElementById('view-login').classList.remove('hidden');
-  setupPrioOptions();
-});
 
 function iniciarApp() {
-  document.getElementById('view-login').classList.add('hidden');
-  document.getElementById('app-shell').classList.remove('hidden');
-  document.getElementById('sidebar-nome').textContent  = S.user.nome;
-  document.getElementById('sidebar-email').textContent = S.user.email;
-  if (S.user.perfil === 'admin') document.getElementById('nav-admin').classList.remove('hidden');
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('sidebar-nome').textContent = usuarioAtual.nome;
+  document.getElementById('sidebar-email').textContent = usuarioAtual.email;
+  if (usuarioAtual.perfil === 'admin') document.getElementById('nav-admin').classList.remove('hidden');
+  showView('dashboard');
   verificarOllama();
-  carregarProcessos();
-  setupDropZone();
-  setupPrioOptions();
-  iniciarAlertasContinuos();
 }
 
-// ============================================================
-// OLLAMA
-// ============================================================
-async function verificarOllama() {
-  try {
-    const r = await fetch(`${OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(3000) });
-    S.ollamaOk = r.ok;
-  } catch(e) { S.ollamaOk = false; }
-  const dot = document.getElementById('ollama-dot');
-  const txt = document.getElementById('ollama-txt');
-  dot.className = S.ollamaOk ? 'ok' : 'err';
-  txt.textContent = S.ollamaOk ? 'IA Local ativa' : 'IA não detectada';
-  return S.ollamaOk;
+// ==================== VIEWS ====================
+function showView(v) {
+  document.querySelectorAll('#sidebar nav a').forEach(a => a.classList.remove('active'));
+  const el = document.getElementById('nav-' + v);
+  if (el) el.classList.add('active');
+  const titles = { dashboard: 'Dashboard', novo: 'Novo Processo', admin: 'Administração' };
+  document.getElementById('page-title').textContent = titles[v] || v;
+  if (v === 'dashboard') renderDashboard();
+  else if (v === 'novo') renderNovo();
+  else if (v === 'admin') renderAdmin();
 }
 
-async function callOllama(prompt) {
-  const r = await fetch(`${OLLAMA_URL}/api/generate`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: OLLAMA_MODEL, prompt, stream: false })
+// ==================== DASHBOARD ====================
+async function renderDashboard() {
+  const content = document.getElementById('content');
+  content.innerHTML = '<div class="text-muted"><span class="spinner"></span> Carregando processos...</div>';
+
+  // Carrega processos
+  const res = await api('processos/listar');
+  if (!res.ok) { content.innerHTML = `<div class="alert alert-danger">${res.erro}</div>`; return; }
+  todosProcessos = res.processos || [];
+
+  // Verifica resumo geral (twice-daily)
+  await verificarEGerarResumoGeral();
+
+  content.innerHTML = '';
+
+  // Resumo geral
+  const rgBox = document.createElement('div');
+  rgBox.id = 'resumo-geral-container';
+  content.appendChild(rgBox);
+  await renderResumoGeral(rgBox);
+
+  // Filtros rápidos
+  const filtros = document.createElement('div');
+  filtros.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px;';
+  filtros.innerHTML = `
+    <button class="btn btn-secondary btn-sm" onclick="filtrarPorStatus('')">Todos</button>
+    <button class="btn btn-secondary btn-sm" onclick="filtrarPorStatus('Em andamento')">Em andamento</button>
+    <button class="btn btn-secondary btn-sm" onclick="filtrarPorStatus('Aguardando')">Aguardando</button>
+    <button class="btn btn-secondary btn-sm" onclick="filtrarPorStatus('Concluído')">Concluídos</button>
+    <select onchange="filtrarPorPrioridade(this.value)" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:.78rem;">
+      <option value="">Todas prioridades</option>
+      <option>Máxima</option><option>Alta</option><option>Média</option><option>Baixa</option>
+    </select>`;
+  content.appendChild(filtros);
+
+  // Grid de cards
+  const grid = document.createElement('div');
+  grid.className = 'cards-grid';
+  grid.id = 'cards-grid';
+  content.appendChild(grid);
+  renderCards(todosProcessos, grid);
+}
+
+function renderCards(lista, grid) {
+  grid.innerHTML = '';
+  if (!lista.length) { grid.innerHTML = '<p class="text-muted">Nenhum processo encontrado.</p>'; return; }
+  lista.forEach(p => {
+    const card = criarCard(p);
+    grid.appendChild(card);
   });
-  const data = await r.json();
-  return data.response || '';
 }
 
-// ============================================================
-// PROCESSOS - LISTAGEM / DASHBOARD
-// ============================================================
-async function carregarProcessos() {
-  const r = await api('processos/listar');
-  if (!r.sucesso) { toast('Erro ao carregar processos: ' + r.erro, 'error'); return; }
-  S.processos = r.processos || [];
-  renderDashboard();
-}
-
-function recarregarProcessos() {
-  carregarProcessos();
-}
-
-function renderDashboard() {
-  const grid = document.getElementById('processos-grid');
-  const stats = document.getElementById('stats-grid');
-
-  const prioCount = { 'Máxima':0, 'Alta':0, 'Média':0, 'Baixa':0 };
-  S.processos.forEach(p => { if (prioCount[p.prioridade] !== undefined) prioCount[p.prioridade]++; });
-
-  stats.innerHTML = `
-    <div class="stat-card"><div class="val" style="color:var(--accent)">${S.processos.length}</div><div class="lbl">Total</div></div>
-    <div class="stat-card stat-maxima"><div class="val" style="color:var(--maxima)">${prioCount['Máxima']}</div><div class="lbl">Máxima</div></div>
-    <div class="stat-card stat-alta"><div class="val" style="color:var(--alta)">${prioCount['Alta']}</div><div class="lbl">Alta</div></div>
-    <div class="stat-card stat-media"><div class="val" style="color:var(--media)">${prioCount['Média']}</div><div class="lbl">Média</div></div>
-    <div class="stat-card stat-baixa"><div class="val" style="color:var(--baixa)">${prioCount['Baixa']}</div><div class="lbl">Baixa</div></div>
-  `;
-
-  filtrarProcessos();
-}
-
-function filtrarProcessos() {
-  const busca   = document.getElementById('filtro-busca').value.toLowerCase();
-  const status  = document.getElementById('filtro-status').value;
-  const prio    = document.getElementById('filtro-prioridade').value;
-
-  let lista = S.processos.filter(p => {
-    const okB = !busca || [p.numero_sei, p.titulo, p.categoria].join(' ').toLowerCase().includes(busca);
-    const okS = !status || p.status === status;
-    const okP = !prio   || p.prioridade === prio;
-    return okB && okS && okP;
-  });
-
-  renderProcessosGrid(lista);
-}
-
-const LIMITE_HORAS = { 'Máxima': 2, 'Alta': 48, 'Média': 72, 'Baixa': 120 };
-
-function horasSemAtualizacao(p) {
-  return (Date.now() - new Date(p.data_atualizacao)) / 3600000;
-}
-
-function deveAlertar(p) {
-  const lim = LIMITE_HORAS[p.prioridade];
-  return lim && horasSemAtualizacao(p) >= lim;
-}
-
-function formatarHorasSemUpd(h) {
-  if (h < 1)  return 'Há menos de 1h';
-  if (h < 24) return `Há ${Math.floor(h)}h`;
-  return `Há ${Math.floor(h/24)} dia(s)`;
-}
-
-function renderProcessosGrid(lista) {
-  const grid = document.getElementById('processos-grid');
-  if (!lista.length) {
-    grid.innerHTML = '<div class="empty-state"><i class="fas fa-folder-open"></i><p>Nenhum processo encontrado</p></div>';
-    return;
+function criarCard(p) {
+  const div = document.createElement('div');
+  div.className = 'process-card';
+  const horas = horasDesdeData(p.data_atualizacao || p.data_cadastro);
+  const limite = LIMITE_HORAS[p.prioridade] || 96;
+  const atrasado = horas > limite;
+  if (atrasado) {
+    if (p.prioridade === 'Máxima') div.classList.add('alerta-maxima');
+    else if (p.prioridade === 'Alta') div.classList.add('alerta-alta');
+    else if (p.prioridade === 'Média') div.classList.add('alerta-media');
   }
-
-  const classeCard = { 'Máxima':'maxima-card','Alta':'alta-card','Média':'media-card','Baixa':'baixa-card' };
-  const classeBadge = { 'Máxima':'badge-maxima','Alta':'badge-alta','Média':'badge-media','Baixa':'badge-baixa' };
-  const iconePrio = { 'Máxima':'🔴','Alta':'🟠','Média':'🟡','Baixa':'🟢' };
-
-  grid.innerHTML = lista.map(p => {
-    const alerta   = deveAlertar(p);
-    const horas    = horasSemAtualizacao(p);
-    const cls      = classeCard[p.prioridade] || '';
-    const badgeCls = classeBadge[p.prioridade] || 'badge-neutral';
-
-    return `
-    <div class="proc-card ${cls} ${alerta ? 'alerta' : ''}" onclick="abrirProcesso('${p.numero_sei}')">
-      ${alerta ? '<div class="alerta-flag">⚠️</div>' : ''}
-      <div class="proc-card-header">
-        <div>
-          <div class="proc-sei">${p.numero_sei}</div>
-          <div class="proc-titulo">${p.titulo || 'Sem título'}</div>
-        </div>
-        <span class="badge ${badgeCls}">${iconePrio[p.prioridade]||''} ${p.prioridade}</span>
-      </div>
-      <div class="proc-meta">
-        <span class="badge badge-neutral">${p.categoria || 'Sem categoria'}</span>
-        <span class="badge badge-info">${p.status}</span>
-        <span class="dias-badge ${alerta?'vencido':''}">${formatarHorasSemUpd(horas)}</span>
-      </div>
+  const priBadge = (p.prioridade || '').replace('á','a').replace('é','e');
+  div.innerHTML = `
+    <div class="sei-num">SEI: ${p.sei}</div>
+    <div class="titulo">${p.titulo}</div>
+    ${p.situacao_atual ? `<div class="situacao">${p.situacao_atual}</div>` : ''}
+    ${p.ultimo_andamento_resumo ? `<div class="ultimo-and"><i class="fa fa-clock" style="margin-right:4px;color:var(--muted);"></i>${p.ultimo_andamento_resumo}${p.ultimo_andamento_data ? ' <small>('+formatarData(p.ultimo_andamento_data)+')</small>' : ''}</div>` : ''}
+    <div class="card-footer">
+      <span class="badge-prioridade ${priBadge}">${p.prioridade}</span>
+      <span class="badge-status">${p.status}</span>
+      ${atrasado ? `<span style="color:${p.prioridade==='Máxima'?'#7c3aed':p.prioridade==='Alta'?'#dc2626':'#ca8a04'};font-size:.72rem;font-weight:600;">⚠ Atrasado</span>` : ''}
     </div>`;
-  }).join('');
+  div.onclick = () => abrirProcesso(p.sei);
+  return div;
 }
 
-// Alertas de Máxima em tempo real (verificação a cada 2h mas timer a cada minuto)
-function iniciarAlertasContinuos() {
-  setInterval(() => {
-    S.processos.forEach(p => { if (p.prioridade === 'Máxima' && deveAlertar(p)) { /* já pisca via CSS */ } });
-    filtrarProcessos(); // re-renderiza para atualizar tempos
-  }, 60000);
+let filtroStatus = '', filtroPrioridade = '', filtroTexto = '';
+function filtrarPorStatus(s) { filtroStatus = s; aplicarFiltros(); }
+function filtrarPorPrioridade(s) { filtroPrioridade = s; aplicarFiltros(); }
+function filtrarCards() { filtroTexto = document.getElementById('search-input').value.toLowerCase(); aplicarFiltros(); }
+function aplicarFiltros() {
+  let lista = todosProcessos;
+  if (filtroStatus) lista = lista.filter(p => p.status === filtroStatus);
+  if (filtroPrioridade) lista = lista.filter(p => p.prioridade === filtroPrioridade);
+  if (filtroTexto) lista = lista.filter(p => (p.sei+p.titulo+p.situacao_atual+'').toLowerCase().includes(filtroTexto));
+  renderCards(lista, document.getElementById('cards-grid'));
 }
 
-// ============================================================
-// PROCESSO - DETALHE
-// ============================================================
+// ==================== RESUMO GERAL ====================
+function getPeriodo() {
+  const h = new Date().getHours();
+  if (h >= 6 && h < 12) return 'manha';
+  if (h >= 13 && h < 18) return 'tarde';
+  return null;
+}
+
+async function verificarEGerarResumoGeral() {
+  const periodo = getPeriodo();
+  if (!periodo) return;
+  const res = await api('resumo-geral/obter?periodo=' + periodo);
+  if (res.ok && res.resumo && res.resumo.conteudo) return; // já existe
+  // Primeiro do período — gerar
+  const ollamaOk = await testarOllama();
+  if (!ollamaOk) return;
+  const processos = todosProcessos;
+  if (!processos.length) return;
+  const lista = processos.slice(0, 20).map(p =>
+    `SEI ${p.sei}: ${p.titulo} (${p.status}, ${p.prioridade}) — ${p.situacao_atual || 'sem situação atual'}`
+  ).join('\n');
+  const turno = periodo === 'manha' ? 'manhã' : 'tarde';
+  const prompt = `Você é analista de processos administrativos de uma Organização Social de Saúde. 
+Gere um resumo gerencial de ${turno} sobre os processos abaixo. Identifique prioridades críticas, processos em risco e pontos de atenção.
+Seja objetivo, máx 300 palavras.
+
+PROCESSOS:
+${lista}
+
+RESUMO GERENCIAL DE ${turno.toUpperCase()}:`;
+  try {
+    const resp = await fetch(OLLAMA_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: OLLAMA_MODEL, prompt, stream: false })
+    });
+    const data = await resp.json();
+    const conteudo = data.response || '';
+    await api('resumo-geral/salvar', { periodo, conteudo });
+    await api('log/registrar', { acao: 'RESUMO_GERAL', detalhes: `Gerado resumo de ${turno}` });
+  } catch(e) { console.warn('Erro ao gerar resumo geral:', e); }
+}
+
+async function renderResumoGeral(container) {
+  const periodo = getPeriodo();
+  if (!periodo) { container.innerHTML = ''; return; }
+  const res = await api('resumo-geral/obter?periodo=' + periodo);
+  const turno = periodo === 'manha' ? '🌅 Resumo da Manhã' : '🌇 Resumo da Tarde';
+  const conteudo = (res.ok && res.resumo) ? res.resumo.conteudo : null;
+  const horario = (res.ok && res.resumo) ? res.resumo.data_geracao : null;
+  container.innerHTML = `
+  <div class="resumo-geral-box">
+    <div class="rg-header">
+      <h3><i class="fa fa-brain" style="color:var(--primary);"></i> ${turno}</h3>
+      <span class="rg-meta">${horario ? 'Gerado às '+formatarDataHora(horario) : 'Aguardando geração...'}</span>
+    </div>
+    <div class="rg-content">${conteudo || '<span class="text-muted">Resumo ainda não gerado para este período.</span>'}</div>
+  </div>`;
+}
+
+// ==================== PROCESSO DETALHE ====================
 async function abrirProcesso(sei) {
-  document.getElementById('view-dashboard').classList.add('hidden');
-  document.getElementById('view-novo-processo').classList.add('hidden');
-  document.getElementById('view-admin').classList.add('hidden');
-  document.getElementById('view-processo').classList.remove('hidden');
-  document.getElementById('topbar-title').textContent = sei;
+  const content = document.getElementById('content');
+  content.innerHTML = '<div class="text-muted"><span class="spinner"></span> Carregando processo...</div>';
+  document.getElementById('page-title').textContent = 'Processo ' + sei;
+  document.querySelectorAll('#sidebar nav a').forEach(a => a.classList.remove('active'));
+  await api('log/registrar', { acao: 'ABRIR_PROCESSO', referencia: sei, detalhes: 'Visualizou processo' });
 
-  const r = await api('processos/buscar', 'GET', { sei });
-  if (!r.sucesso) { toast('Erro ao carregar processo', 'error'); return; }
-
-  S.processoAtual = r.processo;
-  const p = r.processo;
-
-  document.getElementById('det-sei').textContent = p.numero_sei;
-  const classeBadge = { 'Máxima':'badge-maxima','Alta':'badge-alta','Média':'badge-media','Baixa':'badge-baixa' };
-  document.getElementById('det-meta').innerHTML =
-    `<span class="badge badge-info" style="margin-right:6px">${p.status||'Em andamento'}</span>
-     <span class="badge ${classeBadge[p.prioridade]||'badge-neutral'}" style="margin-right:6px">${p.prioridade}</span>
-     <span class="badge badge-neutral">${p.categoria||'Sem categoria'}</span>
-     <span style="margin-left:10px;font-size:12px;color:var(--text2)">Cadastrado por ${p.usuario_cadastro} em ${formatarData(p.data_cadastro)}</span>`;
-
-  document.getElementById('det-resumo').textContent      = p.resumo_ia        || '⏳ Aguardando análise IA';
-  document.getElementById('det-apontamentos').textContent = p.apontamentos_ia  || '—';
-  document.getElementById('det-sugestoes').textContent   = p.sugestoes_ia     || '—';
-  document.getElementById('det-proximos').textContent    = p.proximos_passos_ia|| '—';
-
-  await Promise.all([
-    carregarDocs(sei),
-    carregarAndamentos(sei),
-    carregarAnotacoes(sei),
-    carregarSimilares(sei)
+  const [resP, resA, resD, resAnot, resVer] = await Promise.all([
+    api('processos/obter?sei=' + sei),
+    api('andamentos/listar?sei=' + sei),
+    api('documentos/listar?sei=' + sei),
+    api('anotacoes/listar?sei=' + sei),
+    api('verificacoes/listar?sei=' + sei)
   ]);
 
-  // Se não há análise IA ainda, disparar automaticamente
-  if (!p.resumo_ia && S.ollamaOk) {
-    setTimeout(() => reanalizar(), 500);
-  }
-}
+  if (!resP.ok) { content.innerHTML = `<div class="alert alert-danger">${resP.erro}</div>`; return; }
+  const proc = resP.processo;
+  const andamentos = resA.andamentos || [];
+  const documentos = resD.documentos || [];
+  const anotacoes = resAnot.anotacoes || [];
+  const verificacoes = resVer.verificacoes || [];
 
-async function carregarDocs(sei) {
-  const r = await api('documentos/listar', 'GET', { sei });
-  S.docsAtual = r.documentos || [];
-  const lista = document.getElementById('docs-lista');
-  if (!S.docsAtual.length) {
-    lista.innerHTML = '<div class="empty-state"><i class="fas fa-paperclip"></i><p>Nenhum documento cadastrado</p></div>';
-    return;
-  }
-  const icones = { PDF:'📄', Word:'📝', Excel:'📊', ZIP:'📦', Imagem:'🖼', Texto:'📃' };
-  lista.innerHTML = S.docsAtual.map(d => `
-    <div class="doc-item">
-      <div class="doc-icon">${icones[d.tipo]||'📎'}</div>
-      <div class="doc-info">
-        <div class="doc-name">${d.nome_arquivo}</div>
-        <div class="doc-meta">${d.tipo} · ${formatarBytes(d.tamanho)} · ${d.usuario_upload} · ${formatarData(d.data_upload)}</div>
+  content.innerHTML = `
+  <div style="margin-bottom:16px;">
+    <button class="btn btn-secondary btn-sm" onclick="showView('dashboard')"><i class="fa fa-arrow-left"></i> Voltar</button>
+  </div>
+  <div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px;">
+    <div class="flex justify-between items-center" style="margin-bottom:12px;">
+      <div>
+        <div style="font-size:.75rem;color:var(--muted);font-weight:600;">SEI: ${proc.sei}</div>
+        <h2 style="font-size:1.1rem;margin-top:2px;">${proc.titulo}</h2>
       </div>
-      ${d.url_drive ? `<a href="${d.url_drive}" target="_blank" class="btn btn-ghost btn-sm"><i class="fas fa-external-link-alt"></i></a>` : ''}
-    </div>`).join('');
-}
-
-async function carregarAndamentos(sei) {
-  const r = await api('andamentos/listar', 'GET', { sei });
-  S.andamentosAtual = r.andamentos || [];
-  const lista = document.getElementById('andamentos-lista');
-  if (!S.andamentosAtual.length) {
-    lista.innerHTML = '<div class="empty-state"><i class="fas fa-history"></i><p>Nenhum andamento indexado</p></div>';
-    return;
-  }
-  lista.innerHTML = S.andamentosAtual.map(a => `
-    <div class="andamento-item">
-      <div class="andamento-header">
-        <span class="andamento-data">${a.data_movimento}</span>
-        <span class="andamento-hora">${a.hora_movimento}</span>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <span class="badge-prioridade ${(proc.prioridade||'').replace('á','a').replace('é','e')}">${proc.prioridade}</span>
+        <span class="badge-status">${proc.status}</span>
       </div>
-      <div class="andamento-desc">${a.descricao}</div>
-      <div class="andamento-idx">Indexado por ${a.usuario_indexacao} em ${formatarData(a.data_indexacao)}</div>
-    </div>`).join('');
+    </div>
+    ${proc.situacao_atual ? `<div class="situacao" style="margin-bottom:10px;">${proc.situacao_atual}</div>` : ''}
+    <div style="font-size:.82rem;color:var(--muted);display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;">
+      <span><b>Tipo:</b> ${proc.tipo||'—'}</span>
+      <span><b>Responsável:</b> ${proc.responsavel||'—'}</span>
+      <span><b>Contratada:</b> ${proc.contratada||'—'}</span>
+      <span><b>Cadastro:</b> ${formatarData(proc.data_cadastro)}</span>
+      <span><b>Atualização:</b> ${formatarData(proc.data_atualizacao)}</span>
+    </div>
+    ${proc.descricao ? `<p style="margin-top:10px;font-size:.85rem;color:#374151;">${proc.descricao}</p>` : ''}
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab(this,'tab-andamentos')">Andamentos (${andamentos.length})</div>
+    <div class="tab" onclick="switchTab(this,'tab-documentos')">Documentos (${documentos.length})</div>
+    <div class="tab" onclick="switchTab(this,'tab-anotacoes')">Anotações (${anotacoes.length})</div>
+    <div class="tab" onclick="switchTab(this,'tab-ia')">Análise IA</div>
+    <div class="tab" onclick="switchTab(this,'tab-verificacoes')">Sem Movimentação (${verificacoes.length})</div>
+  </div>
+
+  <div id="tab-andamentos">
+    <div class="flex gap-2" style="margin-bottom:12px;flex-wrap:wrap;">
+      <button class="btn btn-primary btn-sm" onclick="mostrarIndexarAndamento('${sei}')"><i class="fa fa-paste"></i> Indexar Andamentos</button>
+    </div>
+    <div id="lista-andamentos">
+      ${andamentos.length ? andamentos.map(a => `
+        <div class="andamento-item">
+          <div class="and-header">${formatarDataHora(a.data_hora)} — <b>${a.tipo||'Andamento'}</b> — ${a.usuario||''}</div>
+          <div class="and-body">${a.descricao}</div>
+        </div>`).join('') : '<p class="text-muted">Nenhum andamento registrado.</p>'}
+    </div>
+  </div>
+
+  <div id="tab-documentos" class="hidden">
+    <div class="flex gap-2" style="margin-bottom:12px;">
+      <button class="btn btn-primary btn-sm" onclick="mostrarUpload('${sei}')"><i class="fa fa-upload"></i> Enviar Documentos</button>
+    </div>
+    <div id="lista-documentos">
+      ${documentos.length ? documentos.map(d => `
+        <div class="doc-item">
+          <i class="${iconDoc(d.nome_original)}"></i>
+          <div>
+            <div class="doc-name">${d.nome_original}</div>
+            <div class="doc-meta">${formatarData(d.data_upload)} — ${d.usuario||''} — ${d.tamanho ? formatarTamanho(d.tamanho) : ''}</div>
+          </div>
+          <a href="${d.url_drive||'#'}" target="_blank" class="btn btn-secondary btn-sm"><i class="fa fa-external-link-alt"></i></a>
+        </div>`).join('') : '<p class="text-muted">Nenhum documento enviado.</p>'}
+    </div>
+  </div>
+
+  <div id="tab-anotacoes" class="hidden">
+    <div style="margin-bottom:12px;">
+      <textarea id="nova-anotacao" rows="3" placeholder="Digite sua anotação, observação ou informação relevante..." style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;font-size:.85rem;"></textarea>
+      <button class="btn btn-primary btn-sm mt-2" onclick="salvarAnotacao('${sei}')"><i class="fa fa-save"></i> Adicionar Anotação</button>
+    </div>
+    <div id="lista-anotacoes">
+      ${anotacoes.length ? anotacoes.map(a => `
+        <div class="anotacao-item">
+          <div class="anot-header">${formatarDataHora(a.data_hora)} — <b>${a.usuario||''}</b></div>
+          <div class="anot-body">${a.conteudo}</div>
+        </div>`).join('') : '<p class="text-muted">Nenhuma anotação registrada.</p>'}
+    </div>
+  </div>
+
+  <div id="tab-ia" class="hidden">
+    <div id="ia-content">
+      ${proc.ia_categoria ? renderIABox(proc) : '<p class="text-muted">Nenhuma análise de IA disponível. Adicione documentos, andamentos ou anotações para acionar a IA.</p>'}
+    </div>
+    <div id="ia-status-msg" class="mt-2"></div>
+  </div>
+
+  <div id="tab-verificacoes" class="hidden">
+    <div class="alert alert-info" style="margin-bottom:12px;">
+      <i class="fa fa-info-circle"></i> Registre aqui quando não houve movimentação no processo. Isso reinicia o contador de tempo sem acionar nova análise de IA.
+    </div>
+    <button class="btn btn-warning" onclick="registrarSemMovimentacao('${sei}')">
+      <i class="fa fa-check-circle"></i> Registrar: Sem Movimentação
+    </button>
+    <div id="lista-verificacoes" style="margin-top:16px;">
+      ${verificacoes.length ? verificacoes.map(v => `
+        <div style="padding:8px;border-bottom:1px solid var(--border);font-size:.83rem;">
+          <i class="fa fa-check text-muted"></i> ${formatarDataHora(v.data_hora)} — ${v.usuario||''} — ${v.observacao||'Sem movimentação verificada'}
+        </div>`).join('') : '<p class="text-muted">Nenhum registro de verificação.</p>'}
+    </div>
+  </div>`;
+
+  // Guarda dados no scope para uso nos modais
+  window._processoAtual = proc;
 }
 
-async function carregarAnotacoes(sei) {
-  const r = await api('anotacoes/listar', 'GET', { sei });
-  S.anotacoesAtual = r.anotacoes || [];
-  const lista = document.getElementById('anotacoes-lista');
-  if (!S.anotacoesAtual.length) {
-    lista.innerHTML = '<div class="empty-state"><i class="fas fa-sticky-note"></i><p>Nenhuma anotação registrada</p></div>';
-    return;
+function renderIABox(proc) {
+  return `<div class="ia-box">
+    <h4><i class="fa fa-brain"></i> Análise de IA — ${proc.ia_categoria||''}</h4>
+    ${proc.ia_resumo ? `<div class="ia-section"><h5>Resumo</h5><p>${proc.ia_resumo}</p></div>` : ''}
+    ${proc.ia_apontamentos ? `<div class="ia-section"><h5>Apontamentos</h5><p>${proc.ia_apontamentos}</p></div>` : ''}
+    ${proc.ia_sugestoes ? `<div class="ia-section"><h5>Sugestões</h5><p>${proc.ia_sugestoes}</p></div>` : ''}
+    ${proc.ia_proximos_passos ? `<div class="ia-section"><h5>Próximos Passos</h5><p>${proc.ia_proximos_passos}</p></div>` : ''}
+    ${proc.ia_situacao_atual ? `<div class="ia-section"><h5>Situação Atual</h5><p>${proc.ia_situacao_atual}</p></div>` : ''}
+    <div style="font-size:.72rem;color:var(--muted);margin-top:10px;">Última análise: ${formatarDataHora(proc.ia_data_analise)}</div>
+  </div>`;
+}
+
+function switchTab(el, id) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  ['tab-andamentos','tab-documentos','tab-anotacoes','tab-ia','tab-verificacoes'].forEach(t => {
+    const el2 = document.getElementById(t);
+    if (el2) el2.classList.toggle('hidden', t !== id);
+  });
+}
+
+// ==================== SEM MOVIMENTAÇÃO ====================
+async function registrarSemMovimentacao(sei) {
+  const obs = prompt('Observação (opcional):') || 'Sem movimentação verificada';
+  const res = await api('verificacoes/registrar', { sei, observacao: obs });
+  if (res.ok) {
+    await api('log/registrar', { acao: 'SEM_MOVIMENTACAO', referencia: sei, detalhes: obs });
+    alert('Verificação registrada! Contador reiniciado.');
+    abrirProcesso(sei);
+  } else {
+    alert('Erro: ' + (res.erro || 'Não foi possível registrar.'));
   }
-  lista.innerHTML = S.anotacoesAtual.map(a => `
-    <div class="anotacao-item">
-      <div class="anotacao-meta"><i class="fas fa-user"></i> ${a.usuario} · ${formatarDataHora(a.data_hora)}</div>
-      <div class="anotacao-texto">${escapeHtml(a.texto)}</div>
-    </div>`).join('');
 }
 
-async function carregarSimilares(sei) {
-  const r = await api('processos/similares', 'GET', { sei });
-  const similares = r.processos || [];
-  const box = document.getElementById('similares-lista');
-  if (!similares.length) {
-    box.innerHTML = '<p style="font-size:13px;color:var(--text2)">Nenhum processo similar encontrado na base.</p>';
-    return;
+// ==================== ANOTAÇÕES ====================
+async function salvarAnotacao(sei) {
+  const conteudo = document.getElementById('nova-anotacao').value.trim();
+  if (!conteudo) { alert('Digite uma anotação.'); return; }
+  const res = await api('anotacoes/salvar', { sei, conteudo });
+  if (!res.ok) { alert('Erro: ' + res.erro); return; }
+  await api('log/registrar', { acao: 'ANOTACAO', referencia: sei, detalhes: conteudo.substring(0,100) });
+  document.getElementById('nova-anotacao').value = '';
+  // Acionar IA
+  const statusEl = document.getElementById('ia-status-msg');
+  if (statusEl) statusEl.innerHTML = '<span class="spinner"></span> Analisando com IA...';
+  await acionarIA(sei);
+  abrirProcesso(sei);
+}
+
+// ==================== INDEXAR ANDAMENTOS ====================
+function mostrarIndexarAndamento(sei) {
+  const modal = criarModal(`
+    <h2><i class="fa fa-paste"></i> Indexar Andamentos</h2>
+    <p style="font-size:.85rem;color:var(--muted);margin-bottom:12px;">Cole abaixo o histórico de andamentos copiado do SEI. O sistema irá identificar e adicionar apenas os andamentos novos.</p>
+    <div class="form-group">
+      <label>Texto dos Andamentos (cole aqui)</label>
+      <textarea id="texto-andamentos" rows="12" placeholder="Cole o histórico de andamentos do SEI..."></textarea>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-primary" onclick="processarAndamentos('${sei}')"><i class="fa fa-sync"></i> Processar</button>
+      <button class="btn btn-secondary" onclick="fecharModal()">Cancelar</button>
+    </div>
+    <div id="and-result" class="mt-2"></div>`);
+}
+
+async function processarAndamentos(sei) {
+  const texto = document.getElementById('texto-andamentos').value.trim();
+  if (!texto) { alert('Cole o texto dos andamentos.'); return; }
+  const resultEl = document.getElementById('and-result');
+  resultEl.innerHTML = '<span class="spinner"></span> Processando...';
+  const res = await api('andamentos/indexar', { sei, texto_bruto: texto });
+  if (!res.ok) { resultEl.innerHTML = `<div class="alert alert-danger">${res.erro}</div>`; return; }
+  await api('log/registrar', { acao: 'INDEXAR_ANDAMENTOS', referencia: sei, detalhes: `${res.novos||0} novos andamentos` });
+  resultEl.innerHTML = `<div class="alert alert-success"><i class="fa fa-check"></i> ${res.novos||0} novos andamentos adicionados, ${res.duplicatas||0} duplicatas ignoradas.</div>`;
+  if ((res.novos || 0) > 0) {
+    resultEl.innerHTML += '<div class="mt-2"><span class="spinner"></span> Acionando análise de IA...</div>';
+    await acionarIA(sei);
+    resultEl.innerHTML += '<div class="alert alert-success mt-2">Análise de IA concluída!</div>';
   }
-  const cb = { 'Máxima':'badge-maxima','Alta':'badge-alta','Média':'badge-media','Baixa':'badge-baixa' };
-  box.innerHTML = similares.map(p => `
-    <div class="similar-card" onclick="abrirProcesso('${p.numero_sei}')">
-      <div style="display:flex;align-items:center;gap:10px">
-        <strong style="color:var(--accent);font-size:14px">${p.numero_sei}</strong>
-        <span class="badge ${cb[p.prioridade]||'badge-neutral'}" style="font-size:11px">${p.prioridade}</span>
-      </div>
-      <div style="font-size:13px;color:var(--text2);margin-top:4px">${p.titulo||'Sem título'} · ${p.categoria||''}</div>
-      ${p.resumo_ia ? `<div style="font-size:12px;color:var(--text2);margin-top:6px;line-height:1.5">${p.resumo_ia.substring(0,120)}...</div>` : ''}
-    </div>`).join('');
+  setTimeout(() => { fecharModal(); abrirProcesso(sei); }, 1500);
 }
 
-// ============================================================
-// ANÁLISE IA - PROCESSO EXISTENTE
-// ============================================================
-async function reanalizar() {
-  if (!S.processoAtual) return;
-  const ok = await verificarOllama();
-  if (!ok) {
-    document.getElementById('ia-sem-ollama').classList.remove('hidden');
-    return;
+// ==================== UPLOAD DOCUMENTOS ====================
+function mostrarUpload(sei) {
+  criarModal(`
+    <h2><i class="fa fa-upload"></i> Enviar Documentos</h2>
+    <div class="dropzone" id="dropzone-area" onclick="document.getElementById('file-input-hidden').click()">
+      <i class="fa fa-cloud-upload-alt"></i>
+      <p>Arraste arquivos aqui ou clique para selecionar</p>
+      <p style="font-size:.75rem;color:var(--muted);">PDF, DOCX, XLSX, XLS, ZIP, HTML</p>
+    </div>
+    <input type="file" id="file-input-hidden" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.zip,.html" style="display:none" onchange="processarArquivos(event.target.files,'${sei}')">
+    <div id="upload-progress" class="upload-progress mt-2"></div>
+    <div style="margin-top:12px;text-align:right;">
+      <button class="btn btn-secondary" onclick="fecharModal()">Fechar</button>
+    </div>`);
+
+  const dz = document.getElementById('dropzone-area');
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+  dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('over'); processarArquivos(e.dataTransfer.files, sei); });
+}
+
+async function processarArquivos(files, sei) {
+  const prog = document.getElementById('upload-progress');
+  const todosArquivos = [];
+
+  // Expandir ZIPs
+  for (const f of Array.from(files)) {
+    if (f.name.toLowerCase().endsWith('.zip')) {
+      addProgItem(prog, f.name, 'proc', 'Extraindo ZIP...');
+      try {
+        const zip = await JSZip.loadAsync(f);
+        for (const [nome, zipEntry] of Object.entries(zip.files)) {
+          if (!zipEntry.dir && /\.(pdf|docx?|xlsx?|html?)$/i.test(nome)) {
+            const blob = await zipEntry.async('blob');
+            const file2 = new File([blob], nome.split('/').pop(), { type: blob.type });
+            todosArquivos.push(file2);
+          }
+        }
+        updateProgItem(prog, f.name, 'ok', `ZIP extraído`);
+      } catch(e) { updateProgItem(prog, f.name, 'err', 'Erro ao extrair ZIP'); }
+    } else {
+      todosArquivos.push(f);
+    }
   }
-  document.getElementById('ia-sem-ollama').classList.add('hidden');
-  await executarAnaliseIA(S.processoAtual.numero_sei, null, null, 'det');
+
+  // Processar cada arquivo
+  for (const file of todosArquivos) {
+    addProgItem(prog, file.name, 'proc', 'Verificando...');
+    try {
+      const buf = await file.arrayBuffer();
+      const hash = await sha256Buf(buf);
+
+      // Verificar duplicata global
+      const resHash = await api('documentos/verificar-hash?hash=' + hash + '&sei=' + sei);
+      if (resHash.existe) {
+        updateProgItem(prog, file.name, 'dup', 'Duplicata ignorada');
+        continue;
+      }
+
+      updateProgItem(prog, file.name, 'proc', 'Extraindo texto...');
+      const texto = await extrairTexto(file, buf);
+
+      updateProgItem(prog, file.name, 'proc', 'Enviando para Drive...');
+      const base64 = bufToBase64(buf);
+      const resUp = await api('documentos/upload', {
+        sei, nome_original: file.name, hash, base64,
+        mime: file.type || 'application/octet-stream'
+      });
+      if (!resUp.ok) { updateProgItem(prog, file.name, 'err', resUp.erro || 'Falha upload'); continue; }
+
+      const docId = resUp.doc_id;
+
+      // Salvar blocos de texto no Sheets
+      if (texto && texto.trim().length > 0) {
+        updateProgItem(prog, file.name, 'proc', 'Salvando texto em Sheets...');
+        await salvarBlocosSheets(sei, docId, file.name, texto);
+      }
+
+      await api('log/registrar', { acao: 'UPLOAD_DOCUMENTO', referencia: sei, detalhes: file.name });
+      updateProgItem(prog, file.name, 'ok', 'Enviado com sucesso');
+    } catch(e) {
+      updateProgItem(prog, file.name, 'err', 'Erro: ' + e.message);
+    }
+  }
+
+  // Acionar IA
+  const statusSpan = document.createElement('div');
+  statusSpan.className = 'alert alert-info mt-2';
+  statusSpan.innerHTML = '<span class="spinner"></span> Acionando análise de IA...';
+  prog.appendChild(statusSpan);
+  await acionarIA(sei);
+  statusSpan.className = 'alert alert-success mt-2';
+  statusSpan.innerHTML = '<i class="fa fa-check"></i> Análise de IA concluída!';
 }
 
-async function executarAnaliseIA(sei, textosDocs, textoAndamento, prefixo) {
-  const loadEl   = document.getElementById(`${prefixo === 'det' ? 'ia' : 'np'}-loading`) ||
-                   document.getElementById('np-ia-progress');
-  const etapaEl  = document.getElementById(`${prefixo}-ia-etapa`) || document.getElementById('np-ia-etapa');
-  const fillEl   = document.getElementById(`${prefixo}-progress-fill`) || document.getElementById('np-progress-fill');
-  const resEl    = document.getElementById('np-ia-resultado');
-  const semIaEl  = document.getElementById(`${prefixo === 'det' ? 'ia-sem-ollama' : 'np-sem-ia'}`);
+function addProgItem(container, nome, tipo, msg) {
+  const id = 'up-' + nome.replace(/[^a-z0-9]/gi,'_');
+  let el = document.getElementById(id);
+  if (!el) {
+    el = document.createElement('div');
+    el.className = 'up-item';
+    el.id = id;
+    container.appendChild(el);
+  }
+  const icons = { ok: 'fa-check-circle up-ok', dup: 'fa-minus-circle up-dup', err: 'fa-times-circle up-err', proc: 'fa-circle-notch fa-spin up-proc' };
+  el.innerHTML = `<i class="fa ${icons[tipo]||'fa-circle'}"></i><span class="up-name">${nome}</span><span>${msg}</span>`;
+}
+function updateProgItem(c, nome, tipo, msg) { addProgItem(c, nome, tipo, msg); }
 
-  const setEtapa = (txt, pct) => {
-    if (etapaEl) etapaEl.textContent = txt;
-    if (fillEl)  fillEl.style.width = pct + '%';
-  };
-
-  if (loadEl) loadEl.classList.remove('hidden');
-
+// ==================== TEXTO EXTRACTION ====================
+async function extrairTexto(file, buf) {
+  const nome = file.name.toLowerCase();
   try {
-    setEtapa('Carregando instrumentos legais...', 10);
-    if (!S.legalDoc) {
-      const lr = await api('legal-doc/obter');
-      S.legalDoc = lr.conteudo || '';
+    if (nome.endsWith('.pdf')) return await extrairPDF(buf);
+    if (nome.endsWith('.docx') || nome.endsWith('.doc')) {
+      const res = await mammoth.extractRawText({ arrayBuffer: buf });
+      return res.value || '';
     }
-
-    setEtapa('Buscando processos similares...', 20);
-    const simR = await api('processos/similares', 'GET', { sei });
-    const similaresTxt = (simR.processos||[]).map(p =>
-      `SEI ${p.numero_sei} (${p.categoria}): ${p.resumo_ia||'Sem resumo'}`
-    ).join('\n');
-
-    setEtapa('Coletando dados do processo...', 35);
-    if (!textosDocs) {
-      const docsR = await api('documentos/listar', 'GET', { sei });
-      textosDocs = (docsR.documentos||[]).map(d => d.nome_arquivo).join(', ');
+    if (nome.endsWith('.xlsx') || nome.endsWith('.xls')) {
+      const wb = XLSX.read(new Uint8Array(buf), { type: 'array' });
+      return wb.SheetNames.map(sn => XLSX.utils.sheet_to_csv(wb.Sheets[sn])).join('\n\n');
     }
-    if (!textoAndamento) {
-      const andR = await api('andamentos/listar', 'GET', { sei });
-      textoAndamento = (andR.andamentos||[]).map(a =>
-        `${a.data_movimento} ${a.hora_movimento}: ${a.descricao}`
-      ).join('\n');
+    if (nome.endsWith('.html') || nome.endsWith('.htm')) {
+      const decoder = new TextDecoder('utf-8');
+      const html = decoder.decode(buf);
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      return doc.body ? doc.body.innerText || doc.body.textContent : '';
     }
+  } catch(e) { console.warn('Erro ao extrair texto de', file.name, e); }
+  return '';
+}
 
-    const p = S.processoAtual || S.processos.find(x => x.numero_sei === sei) || {};
+async function extrairPDF(buf) {
+  // Usa PDF.js via CDN se disponível, senão tenta método simples
+  if (typeof pdfjsLib !== 'undefined') {
+    const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
+    let texto = '';
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      texto += content.items.map(item => item.str).join(' ') + '\n';
+    }
+    return texto;
+  }
+  // Fallback: extração simples de texto de PDF
+  const decoder = new TextDecoder('latin1');
+  const text = decoder.decode(buf);
+  const matches = text.match(/\(([^\)]{2,})\)/g) || [];
+  return matches.map(m => m.slice(1,-1)).join(' ');
+}
 
-    setEtapa('Analisando com IA local...', 55);
-    const prompt = `Você é um especialista em gestão de processos administrativos SEI (Sistema Eletrônico de Informações) do Brasil.
+// ==================== BLOCOS SHEETS ====================
+function dividirEmBlocos(texto, maxChars) {
+  const blocos = [];
+  let i = 0;
+  while (i < texto.length) {
+    blocos.push(texto.substring(i, i + maxChars));
+    i += maxChars;
+  }
+  return blocos;
+}
 
-PROCESSO SEI: ${sei}
-TÍTULO: ${p.titulo || ''}
+async function salvarBlocosSheets(sei, docId, docNome, texto) {
+  const blocos = dividirEmBlocos(texto, BLOCO_MAX);
+  for (let i = 0; i < blocos.length; i++) {
+    await api('conteudo/salvar-bloco', {
+      sei, doc_id: docId, doc_nome: docNome,
+      bloco_num: i + 1, total_blocos: blocos.length,
+      conteudo: blocos[i]
+    });
+  }
+}
 
-DOCUMENTOS ANEXADOS:
-${textosDocs || 'Não informado'}
+// ==================== IA ANÁLISE ====================
+async function acionarIA(sei) {
+  const ollamaOk = await testarOllama();
+  if (!ollamaOk) return;
 
-HISTÓRICO DE ANDAMENTOS:
-${textoAndamento || 'Não informado'}
+  // Busca blocos de conteúdo
+  const resConteudo = await api('conteudo/listar?sei=' + sei);
+  const blocos = (resConteudo.blocos || []).map(b => b.conteudo || '');
 
-INSTRUMENTOS LEGAIS (resumo):
-${S.legalDoc ? S.legalDoc.substring(0, 8000) : 'Não configurado'}
+  // Busca bases legais
+  const resBases = await api('bases-legais/listar');
+  const basesLegais = (resBases.blocos || []).map(b => b.conteudo || '');
 
-PROCESSOS SIMILARES NA BASE:
-${similaresTxt || 'Nenhum processo similar encontrado'}
+  // Busca dados do processo
+  const [resP, resA, resAnot] = await Promise.all([
+    api('processos/obter?sei=' + sei),
+    api('andamentos/listar?sei=' + sei),
+    api('anotacoes/listar?sei=' + sei)
+  ]);
 
-Com base nas informações acima, forneça uma análise completa em JSON (sem markdown, apenas o JSON):
+  const proc = resP.processo || {};
+  const andamentos = (resA.andamentos || []).slice(-5).map(a => `${a.data_hora}: ${a.descricao}`).join('\n');
+  const anotacoes = (resAnot.anotacoes || []).slice(-3).map(a => `${a.data_hora}: ${a.conteudo}`).join('\n');
+
+  // Filtrar blocos relevantes
+  const keywords = [proc.titulo||'', proc.tipo||'', sei, 'contrato', 'prazo', 'pagamento', 'execução', 'saúde']
+    .join(' ').toLowerCase().split(/\s+/).filter(k => k.length > 3);
+
+  const conteudoFiltrado = filtrarBlocos(blocos, keywords, RELEVANCIA_MAX_CHARS);
+  const basesLegaisFiltradas = filtrarBlocos(basesLegais, keywords, 10000);
+
+  const prompt = `Você é um especialista em gestão de contratos e processos administrativos de Organização Social de Saúde (OSS).
+Analise o processo abaixo e gere uma análise estruturada.
+
+PROCESSO: SEI ${sei}
+TÍTULO: ${proc.titulo || ''}
+TIPO: ${proc.tipo || ''}
+STATUS: ${proc.status || ''}
+PRIORIDADE: ${proc.prioridade || ''}
+CONTRATADA: ${proc.contratada || ''}
+
+ÚLTIMOS ANDAMENTOS:
+${andamentos || 'Sem andamentos.'}
+
+ANOTAÇÕES RECENTES:
+${anotacoes || 'Sem anotações.'}
+
+${conteudoFiltrado ? 'CONTEÚDO DOS DOCUMENTOS:\n' + conteudoFiltrado : ''}
+${basesLegaisFiltradas ? '\nBASES LEGAIS APLICÁVEIS:\n' + basesLegaisFiltradas : ''}
+
+Responda EXATAMENTE neste formato JSON (sem markdown, sem explicações antes/depois):
 {
-  "categoria": "categoria objetiva do processo em até 5 palavras",
-  "resumo": "resumo executivo em 3-5 linhas explicando o que é o processo, sua natureza e situação atual",
-  "apontamentos": "pontos críticos, aspectos jurídicos relevantes e possíveis riscos com base nos instrumentos legais",
-  "sugestoes": "sugestões de encaminhamento baseadas nos instrumentos legais e nos processos similares",
-  "proximos_passos": "lista numerada das próximas ações concretas a serem tomadas",
-  "aprendizado": "insight preditivo baseado nos processos similares — o que costuma acontecer neste tipo de caso"
+  "categoria": "categoria do processo em 3-5 palavras",
+  "situacao_atual": "situação atual em 1-2 frases curtas",
+  "resumo": "resumo detalhado do processo",
+  "apontamentos": "pontos críticos e riscos identificados",
+  "sugestoes": "sugestões de ação",
+  "proximos_passos": "próximos passos concretos recomendados"
 }`;
 
-    const resposta = await callOllama(prompt);
-    setEtapa('Processando resposta...', 80);
-
-    let analise;
-    try {
-      const jsonMatch = resposta.match(/\{[\s\S]*\}/);
-      analise = JSON.parse(jsonMatch ? jsonMatch[0] : resposta);
-    } catch(e) {
-      // Fallback: estrutura manual
-      analise = {
-        categoria: 'Não categorizado',
-        resumo: resposta.substring(0, 500),
-        apontamentos: '—', sugestoes: '—', proximos_passos: '—', aprendizado: '—'
-      };
+  try {
+    const resp = await fetch(OLLAMA_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: OLLAMA_MODEL, prompt, stream: false })
+    });
+    const data = await resp.json();
+    const raw = (data.response || '').trim();
+    
+    // Extrai JSON da resposta
+    let ia;
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try { ia = JSON.parse(jsonMatch[0]); } catch { ia = null; }
+    }
+    if (!ia) {
+      // Fallback: salva resposta bruta como resumo
+      ia = { categoria: 'Análise', situacao_atual: '', resumo: raw, apontamentos: '', sugestoes: '', proximos_passos: '' };
     }
 
-    setEtapa('Salvando análise...', 90);
-    await api('processos/salvar-ia', 'POST', { numero_sei: sei, ...analise });
-    S.npIAResult = analise;
+    await api('processos/salvar-ia', {
+      sei,
+      ia_categoria: ia.categoria || '',
+      ia_resumo: ia.resumo || '',
+      ia_apontamentos: ia.apontamentos || '',
+      ia_sugestoes: ia.sugestoes || '',
+      ia_proximos_passos: ia.proximos_passos || '',
+      ia_situacao_atual: ia.situacao_atual || '',
+      ia_data_analise: new Date().toISOString()
+    });
+    await api('log/registrar', { acao: 'ANALISE_IA', referencia: sei, detalhes: 'Análise concluída' });
+  } catch(e) { console.warn('Erro na análise IA:', e); }
+}
 
-    setEtapa('Concluído!', 100);
-    if (loadEl) loadEl.classList.add('hidden');
+function filtrarBlocos(blocos, keywords, maxChars) {
+  if (!blocos.length) return '';
+  // Pontuar cada bloco por relevância
+  const pontuados = blocos.map(b => {
+    const bl = b.toLowerCase();
+    const score = keywords.reduce((acc, k) => acc + (bl.split(k).length - 1), 0);
+    return { b, score };
+  }).sort((a, b2) => b2.score - a.score);
 
-    // Atualiza UI
-    if (prefixo === 'det') {
-      document.getElementById('det-resumo').textContent       = analise.resumo        || '—';
-      document.getElementById('det-apontamentos').textContent  = analise.apontamentos  || '—';
-      document.getElementById('det-sugestoes').textContent    = analise.sugestoes     || '—';
-      document.getElementById('det-proximos').textContent     = analise.proximos_passos|| '—';
-      // Atualiza no array
-      const idx = S.processos.findIndex(x => x.numero_sei === sei);
-      if (idx >= 0) Object.assign(S.processos[idx], analise);
-    } else {
-      if (resEl) resEl.classList.remove('hidden');
-      document.getElementById('np-categoria-ia').textContent   = analise.categoria     || '—';
-      document.getElementById('np-categoria-edit').value       = analise.categoria     || '';
-      document.getElementById('np-resumo-ia').textContent      = analise.resumo        || '—';
-      document.getElementById('np-apontamentos-ia').textContent= analise.apontamentos  || '—';
-      document.getElementById('np-sugestoes-ia').textContent   = (analise.sugestoes + '\n\n' + analise.proximos_passos) || '—';
-      document.getElementById('btn-step5').disabled = false;
+  let resultado = '';
+  for (const { b } of pontuados) {
+    if (resultado.length + b.length > maxChars) break;
+    resultado += b + '\n---\n';
+  }
+  return resultado;
+}
+
+// ==================== NOVO PROCESSO ====================
+let wizardStep = 1;
+let novoProc = {};
+
+function renderNovo() {
+  wizardStep = 1;
+  novoProc = {};
+  const content = document.getElementById('content');
+  content.innerHTML = `
+  <div style="max-width:680px;margin:0 auto;">
+    <div class="wizard-steps" id="wizard-steps">
+      <div class="wizard-step active" id="ws1">1. Identificação</div>
+      <div class="wizard-step" id="ws2">2. Detalhes</div>
+      <div class="wizard-step" id="ws3">3. Documentos</div>
+      <div class="wizard-step" id="ws4">4. Andamentos</div>
+      <div class="wizard-step" id="ws5">5. Confirmar</div>
+    </div>
+    <div id="wizard-body" style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:24px;">
+    </div>
+  </div>`;
+  renderWizardStep();
+}
+
+function renderWizardStep() {
+  const body = document.getElementById('wizard-body');
+  if (wizardStep === 1) {
+    body.innerHTML = `
+      <h3 style="margin-bottom:16px;">Identificação do Processo</h3>
+      <div class="form-group"><label>Número SEI *</label><input id="w-sei" value="${novoProc.sei||''}" placeholder="Ex: 2024.0001234"></div>
+      <div class="form-group"><label>Título / Objeto *</label><input id="w-titulo" value="${novoProc.titulo||''}" placeholder="Descrição resumida do processo"></div>
+      <div class="form-group"><label>Tipo</label>
+        <select id="w-tipo">
+          ${['Contrato','Convênio','Aditivo','Ata de Registro','Autorização','Outro'].map(t => `<option ${novoProc.tipo===t?'selected':''}>${t}</option>`).join('')}
+        </select>
+      </div>
+      <div class="flex gap-2 mt-4"><button class="btn btn-primary" onclick="wizardNext()">Próximo <i class="fa fa-arrow-right"></i></button></div>`;
+  } else if (wizardStep === 2) {
+    body.innerHTML = `
+      <h3 style="margin-bottom:16px;">Detalhes do Processo</h3>
+      <div class="form-group"><label>Status</label>
+        <select id="w-status">
+          ${['Em andamento','Aguardando','Concluído','Suspenso'].map(s => `<option ${novoProc.status===s?'selected':''}>${s}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group"><label>Prioridade</label>
+        <select id="w-prioridade">
+          ${['Baixa','Média','Alta','Máxima'].map(p => `<option ${novoProc.prioridade===p?'selected':''}>${p}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group"><label>Responsável</label><input id="w-responsavel" value="${novoProc.responsavel||''}"></div>
+      <div class="form-group"><label>Contratada</label><input id="w-contratada" value="${novoProc.contratada||''}"></div>
+      <div class="form-group"><label>Descrição</label><textarea id="w-descricao">${novoProc.descricao||''}</textarea></div>
+      <div class="flex gap-2 mt-4">
+        <button class="btn btn-secondary" onclick="wizardPrev()"><i class="fa fa-arrow-left"></i> Voltar</button>
+        <button class="btn btn-primary" onclick="wizardNext()">Próximo <i class="fa fa-arrow-right"></i></button>
+      </div>`;
+  } else if (wizardStep === 3) {
+    body.innerHTML = `
+      <h3 style="margin-bottom:16px;">Documentos (opcional)</h3>
+      <div class="dropzone" id="dropzone-novo" onclick="document.getElementById('file-novo').click()">
+        <i class="fa fa-cloud-upload-alt"></i>
+        <p>Arraste documentos ou clique para selecionar</p>
+        <p style="font-size:.75rem;color:var(--muted);">PDF, DOCX, XLSX, ZIP, HTML (máx 20MB cada)</p>
+      </div>
+      <input type="file" id="file-novo" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.zip,.html" style="display:none" onchange="novoProc._files=event.target.files;mostrarArquivosSelecionados()">
+      <div id="files-selecionados" class="mt-2"></div>
+      <div class="flex gap-2 mt-4">
+        <button class="btn btn-secondary" onclick="wizardPrev()"><i class="fa fa-arrow-left"></i> Voltar</button>
+        <button class="btn btn-primary" onclick="wizardNext()">Próximo <i class="fa fa-arrow-right"></i></button>
+      </div>`;
+    const dz = document.getElementById('dropzone-novo');
+    dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
+    dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+    dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('over'); novoProc._files = e.dataTransfer.files; mostrarArquivosSelecionados(); });
+  } else if (wizardStep === 4) {
+    body.innerHTML = `
+      <h3 style="margin-bottom:16px;">Andamentos Iniciais (opcional)</h3>
+      <p style="font-size:.84rem;color:var(--muted);margin-bottom:10px;">Cole o histórico de andamentos do SEI (se houver).</p>
+      <div class="form-group"><textarea id="w-andamentos" rows="10" placeholder="Cole aqui o histórico de andamentos...">${novoProc.andamentos||''}</textarea></div>
+      <div class="flex gap-2 mt-4">
+        <button class="btn btn-secondary" onclick="wizardPrev()"><i class="fa fa-arrow-left"></i> Voltar</button>
+        <button class="btn btn-primary" onclick="wizardNext()">Próximo <i class="fa fa-arrow-right"></i></button>
+      </div>`;
+  } else if (wizardStep === 5) {
+    body.innerHTML = `
+      <h3 style="margin-bottom:16px;">Confirmar Cadastro</h3>
+      <div style="background:#f9fafb;border-radius:8px;padding:16px;font-size:.85rem;margin-bottom:16px;">
+        <b>SEI:</b> ${novoProc.sei}<br>
+        <b>Título:</b> ${novoProc.titulo}<br>
+        <b>Tipo:</b> ${novoProc.tipo} — <b>Status:</b> ${novoProc.status} — <b>Prioridade:</b> ${novoProc.prioridade}<br>
+        <b>Responsável:</b> ${novoProc.responsavel||'—'} — <b>Contratada:</b> ${novoProc.contratada||'—'}<br>
+        <b>Documentos:</b> ${novoProc._files ? novoProc._files.length : 0}<br>
+        <b>Andamentos:</b> ${novoProc.andamentos ? 'Sim' : 'Não'}
+      </div>
+      <div id="novo-status"></div>
+      <div class="flex gap-2 mt-4">
+        <button class="btn btn-secondary" onclick="wizardPrev()"><i class="fa fa-arrow-left"></i> Voltar</button>
+        <button class="btn btn-success" onclick="cadastrarProcesso()"><i class="fa fa-save"></i> Cadastrar Processo</button>
+      </div>`;
+  }
+  // Atualizar indicadores
+  for (let i = 1; i <= 5; i++) {
+    const ws = document.getElementById('ws'+i);
+    if (ws) {
+      ws.className = 'wizard-step' + (i < wizardStep ? ' done' : i === wizardStep ? ' active' : '');
     }
-
-    toast('Análise IA concluída ✓', 'success');
-
-  } catch(err) {
-    if (loadEl) loadEl.classList.add('hidden');
-    if (semIaEl) semIaEl.classList.remove('hidden');
-    if (prefixo !== 'det') document.getElementById('btn-step5').disabled = false;
-    console.error('Erro IA:', err);
-    toast('Erro na análise IA: ' + err.message, 'error');
   }
 }
 
-// ============================================================
-// NOVO PROCESSO - STEPS
-// ============================================================
-let npCurrentStep = 1;
-
-function npGoStep(n) {
-  for (let i=1;i<=5;i++) {
-    document.getElementById(`np-step${i}`).classList.add('hidden');
-    const el = document.getElementById(`step-${i}`);
-    el.classList.remove('active','done');
-    if (i < n) el.classList.add('done');
-    if (i === n) el.classList.add('active');
+function wizardNext() {
+  if (wizardStep === 1) {
+    novoProc.sei = document.getElementById('w-sei').value.trim();
+    novoProc.titulo = document.getElementById('w-titulo').value.trim();
+    novoProc.tipo = document.getElementById('w-tipo').value;
+    if (!novoProc.sei || !novoProc.titulo) { alert('Preencha SEI e Título.'); return; }
+  } else if (wizardStep === 2) {
+    novoProc.status = document.getElementById('w-status').value;
+    novoProc.prioridade = document.getElementById('w-prioridade').value;
+    novoProc.responsavel = document.getElementById('w-responsavel').value.trim();
+    novoProc.contratada = document.getElementById('w-contratada').value.trim();
+    novoProc.descricao = document.getElementById('w-descricao').value.trim();
+  } else if (wizardStep === 4) {
+    novoProc.andamentos = document.getElementById('w-andamentos').value.trim();
   }
-  document.getElementById(`np-step${n}`).classList.remove('hidden');
-  npCurrentStep = n;
+  wizardStep = Math.min(wizardStep + 1, 5);
+  renderWizardStep();
+}
+function wizardPrev() { wizardStep = Math.max(wizardStep - 1, 1); renderWizardStep(); }
+
+function mostrarArquivosSelecionados() {
+  const el = document.getElementById('files-selecionados');
+  if (!novoProc._files || !novoProc._files.length) { el.innerHTML = ''; return; }
+  el.innerHTML = Array.from(novoProc._files).map(f => `<div class="doc-item"><i class="${iconDoc(f.name)}"></i><span>${f.name}</span><span class="doc-meta">${formatarTamanho(f.size)}</span></div>`).join('');
 }
 
-async function npStep2() {
-  const sei = document.getElementById('np-sei').value.trim();
-  if (!sei) { toast('Informe o número SEI', 'error'); return; }
-  const check = await api('processos/buscar', 'GET', { sei });
-  if (check.sucesso) { toast('Processo já cadastrado! Abra-o no dashboard para atualizar.', 'error'); return; }
-  npGoStep(2);
-}
+async function cadastrarProcesso() {
+  const statusEl = document.getElementById('novo-status');
+  statusEl.innerHTML = '<span class="spinner"></span> Cadastrando processo...';
 
-function npStep3() { npGoStep(3); }
-
-async function npStep4() {
-  npGoStep(4);
-  document.getElementById('np-ia-progress').classList.remove('hidden');
-  document.getElementById('np-ia-resultado').classList.add('hidden');
-  document.getElementById('np-sem-ia').classList.add('hidden');
-  document.getElementById('btn-step5').disabled = true;
-
-  const sei   = document.getElementById('np-sei').value.trim();
-  const titulo = document.getElementById('np-titulo').value.trim();
-
-  // Primeiro cria o processo
-  const cr = await api('processos/criar', 'POST', {
-    numero_sei: sei, titulo,
-    status: 'Em andamento', prioridade: 'Média'
+  const res = await api('processos/criar', {
+    sei: novoProc.sei, titulo: novoProc.titulo, tipo: novoProc.tipo,
+    status: novoProc.status, prioridade: novoProc.prioridade,
+    responsavel: novoProc.responsavel, contratada: novoProc.contratada,
+    descricao: novoProc.descricao
   });
-  if (!cr.sucesso) { toast('Erro ao criar processo: ' + cr.erro, 'error'); return; }
+
+  if (!res.ok) { statusEl.innerHTML = `<div class="alert alert-danger">${res.erro}</div>`; return; }
+  await api('log/registrar', { acao: 'CRIAR_PROCESSO', referencia: novoProc.sei, detalhes: novoProc.titulo });
 
   // Upload de documentos
-  let textosDocs = '';
-  if (S.npFiles.length > 0) {
-    setNpEtapa('Enviando documentos ao Drive...', 30);
-    textosDocs = await uploadDocumentos(sei, S.npFiles, 'np-ia-etapa', 'np-progress-fill');
-  }
-
-  // Indexar andamento
-  const andamento = document.getElementById('np-andamento').value.trim();
-  if (andamento) {
-    setNpEtapa('Indexando andamentos...', 45);
-    await api('andamentos/indexar', 'POST', { numero_sei: sei, texto: andamento });
-  }
-
-  // Analise IA
-  const ok = await verificarOllama();
-  if (!ok) {
-    document.getElementById('np-ia-progress').classList.add('hidden');
-    document.getElementById('np-sem-ia').classList.remove('hidden');
-    document.getElementById('btn-step5').disabled = false;
-    return;
-  }
-
-  S.processoAtual = { numero_sei: sei, titulo };
-  await executarAnaliseIA(sei, textosDocs, andamento, 'np');
-}
-
-function setNpEtapa(txt, pct) {
-  document.getElementById('np-ia-etapa').textContent = txt;
-  document.getElementById('np-progress-fill').style.width = pct + '%';
-}
-
-function npStep5() { npGoStep(5); }
-
-async function npFinalizar() {
-  const sei  = document.getElementById('np-sei').value.trim();
-  const prio = document.querySelector('input[name="prioridade"]:checked')?.value || 'Média';
-  const cat  = document.getElementById('np-categoria-edit')?.value.trim() || '';
-
-  await api('processos/atualizar', 'POST', { numero_sei: sei, prioridade: prio, categoria: cat });
-  toast('Processo cadastrado com sucesso! ✓', 'success');
-
-  // Limpa estado NP
-  S.npFiles = [];
-  S.npIAResult = null;
-  document.getElementById('np-sei').value = '';
-  document.getElementById('np-titulo').value = '';
-  document.getElementById('np-andamento').value = '';
-  document.getElementById('file-list-preview').innerHTML = '';
-
-  await carregarProcessos();
-  navTo('dashboard');
-  setTimeout(() => abrirProcesso(sei), 300);
-}
-
-// ============================================================
-// UPLOAD DE DOCUMENTOS
-// ============================================================
-function setupDropZone() {
-  setupDZ('drop-zone', 'file-input', S.npFiles, 'file-list-preview');
-  setupDZ('drop-zone-modal', 'file-input-modal', S.npModalFiles, 'file-list-modal');
-}
-
-function setupDZ(zoneId, inputId, filesArr, listId) {
-  const zone = document.getElementById(zoneId);
-  if (!zone) return;
-  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
-  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
-  zone.addEventListener('drop', e => {
-    e.preventDefault(); zone.classList.remove('drag-over');
-    handleFiles(e.dataTransfer.files, filesArr, listId);
-  });
-}
-
-async function handleFiles(files, target, listId) {
-  target = target || S.npFiles;
-  listId = listId || 'file-list-preview';
-  const sei = document.getElementById('np-sei')?.value.trim() || S.modalDocsTargetSei || '';
-
-  for (const file of Array.from(files)) {
-    const ext = file.name.split('.').pop().toLowerCase();
-    if (ext === 'zip') {
-      await processarZip(file, target, listId, sei);
-    } else {
-      await processarArquivo(file, target, listId, sei);
+  if (novoProc._files && novoProc._files.length > 0) {
+    statusEl.innerHTML = '<span class="spinner"></span> Enviando documentos...';
+    for (const file of Array.from(novoProc._files)) {
+      try {
+        const buf = await file.arrayBuffer();
+        const hash = await sha256Buf(buf);
+        const texto = await extrairTexto(file, buf);
+        const base64 = bufToBase64(buf);
+        const resUp = await api('documentos/upload', {
+          sei: novoProc.sei, nome_original: file.name, hash, base64,
+          mime: file.type || 'application/octet-stream'
+        });
+        if (resUp.ok && texto) await salvarBlocosSheets(novoProc.sei, resUp.doc_id, file.name, texto);
+      } catch(e) { console.warn('Erro ao enviar', file.name, e); }
     }
   }
-}
 
-function handleFilesModal(files) {
-  handleFiles(files, S.npModalFiles, 'file-list-modal');
-}
-
-async function processarZip(zipFile, target, listId, sei) {
-  try {
-    const buffer = await zipFile.arrayBuffer();
-    const zip = await JSZip.loadAsync(buffer);
-    for (const [nome, entry] of Object.entries(zip.files)) {
-      if (entry.dir) continue;
-      const blob = await entry.async('blob');
-      const f = new File([blob], nome.split('/').pop(), { type: blob.type });
-      await processarArquivo(f, target, listId, sei);
-    }
-  } catch(e) {
-    adicionarItemLista(listId, zipFile.name, 'error', '⚠ Erro ao extrair ZIP: ' + e.message);
+  // Indexar andamentos
+  if (novoProc.andamentos) {
+    statusEl.innerHTML = '<span class="spinner"></span> Indexando andamentos...';
+    await api('andamentos/indexar', { sei: novoProc.sei, texto_bruto: novoProc.andamentos });
   }
-}
 
-async function processarArquivo(file, target, listId, sei) {
-  const idx = target.length;
-  adicionarItemLista(listId, file.name, 'loading', '⏳ Verificando...');
-
-  try {
-    const hash = await computarHash(file);
-
-    // Verifica duplicata
-    if (sei) {
-      const check = await api('documentos/verificar-hash', 'POST', { numero_sei: sei, hash });
-      if (check.existe) {
-        atualizarItemLista(listId, idx, 'dup', '✓ Já cadastrado — ignorado');
-        return;
-      }
-    }
-
-    // Extrai texto para IA
-    const texto = await extrairTexto(file);
-    target.push({ file, hash, texto, nome: file.name });
-    atualizarItemLista(listId, idx, 'new', '✓ Novo — aguardando upload');
-
-  } catch(e) {
-    atualizarItemLista(listId, idx, 'error', '⚠ ' + e.message);
+  // Acionar IA se há conteúdo
+  if (novoProc._files?.length || novoProc.andamentos) {
+    statusEl.innerHTML = '<span class="spinner"></span> Gerando análise de IA...';
+    await acionarIA(novoProc.sei);
   }
+
+  statusEl.innerHTML = '<div class="alert alert-success"><i class="fa fa-check"></i> Processo cadastrado com sucesso!</div>';
+  setTimeout(() => abrirProcesso(novoProc.sei), 1500);
 }
 
-function adicionarItemLista(listId, nome, status, msg) {
-  const lista = document.getElementById(listId);
-  const div = document.createElement('div');
-  div.className = 'file-preview-item';
-  div.dataset.idx = lista.children.length;
-  div.innerHTML = `<span>${fileIcon(nome)}</span><span style="flex:1;font-size:13px">${nome}</span><span class="fi-status fi-${status}">${msg}</span>`;
-  lista.appendChild(div);
+// ==================== ADMIN ====================
+async function renderAdmin() {
+  if (usuarioAtual?.perfil !== 'admin') { document.getElementById('content').innerHTML = '<div class="alert alert-danger">Acesso negado.</div>'; return; }
+  const content = document.getElementById('content');
+  content.innerHTML = `
+  <div class="tabs">
+    <div class="tab active" onclick="switchTabAdmin(this,'adm-usuarios')">Usuários</div>
+    <div class="tab" onclick="switchTabAdmin(this,'adm-config')">Configurações</div>
+    <div class="tab" onclick="switchTabAdmin(this,'adm-bases')">Bases Legais</div>
+    <div class="tab" onclick="switchTabAdmin(this,'adm-logs')">Logs</div>
+  </div>
+  <div id="adm-usuarios"><span class="spinner"></span> Carregando...</div>
+  <div id="adm-config" class="hidden"><span class="spinner"></span> Carregando...</div>
+  <div id="adm-bases" class="hidden"><span class="spinner"></span> Carregando...</div>
+  <div id="adm-logs" class="hidden"><span class="spinner"></span> Carregando...</div>`;
+
+  carregarAdmUsuarios();
 }
 
-function atualizarItemLista(listId, idx, status, msg) {
-  const lista = document.getElementById(listId);
-  const item = lista.querySelector(`[data-idx="${idx}"]`);
-  if (!item) return;
-  const s = item.querySelector('.fi-status');
-  if (s) { s.className = `fi-status fi-${status}`; s.textContent = msg; }
-}
-
-async function uploadDocumentos(sei, files, etapaElId, progressElId) {
-  let textoAcumulado = '';
-  for (let i = 0; i < files.length; i++) {
-    const f = files[i];
-    if (etapaElId) document.getElementById(etapaElId).textContent = `Enviando: ${f.nome} (${i+1}/${files.length})`;
-
-    try {
-      const b64 = await fileToBase64(f.file);
-      const ext  = f.nome.split('.').pop().toLowerCase();
-      const mime = { pdf:'application/pdf', doc:'application/msword',
-        docx:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        xls:'application/vnd.ms-excel',
-        xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }[ext] || 'application/octet-stream';
-
-      await api('documentos/upload', 'POST', {
-        numero_sei: sei, nome_arquivo: f.nome,
-        conteudo_base64: b64, mime_type: mime,
-        hash_arquivo: f.hash, tamanho: f.file.size
-      });
-
-      if (f.texto) textoAcumulado += `\n\n[${f.nome}]\n${f.texto}`;
-    } catch(e) { console.error('Upload erro', f.nome, e); }
-  }
-  return textoAcumulado;
-}
-
-async function uploadDocumentosModal() {
-  const sei = S.modalDocsTargetSei || S.processoAtual?.numero_sei;
-  if (!sei || !S.npModalFiles.length) { toast('Selecione arquivos antes de enviar', 'error'); return; }
-  toast('Enviando arquivos...', 'success');
-  const textos = await uploadDocumentos(sei, S.npModalFiles, null, null);
-  toast(`${S.npModalFiles.length} arquivo(s) enviado(s)`, 'success');
-  fecharModal('modal-docs');
-  S.npModalFiles = [];
-  document.getElementById('file-list-modal').innerHTML = '';
-  await carregarDocs(sei);
-
-  // Re-analisar se Ollama disponível
-  if (S.ollamaOk && S.processoAtual) await reanalizar();
-}
-
-// ============================================================
-// EXTRAÇÃO DE TEXTO DE DOCUMENTOS
-// ============================================================
-async function extrairTexto(file) {
-  const ext = file.name.split('.').pop().toLowerCase();
-  try {
-    if (ext === 'pdf')  return await extrairPDF(file);
-    if (ext === 'docx') return await extrairDocx(file);
-    if (ext === 'doc')  return await extrairDocx(file);
-    if (['xlsx','xls'].includes(ext)) return await extrairExcel(file);
-    if (ext === 'txt')  return await file.text();
-    return '';
-  } catch(e) { return ''; }
-}
-
-async function extrairPDF(file) {
-  const src = URL.createObjectURL(file);
-  // Carrega PDF.js dinamicamente
-  if (!window.pdfjsLib) {
-    await carregarScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc =
-      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-  }
-  const pdf = await window.pdfjsLib.getDocument(src).promise;
-  let texto = '';
-  for (let i = 1; i <= Math.min(pdf.numPages, 20); i++) {
-    const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    texto += content.items.map(s => s.str).join(' ') + '\n';
-  }
-  URL.revokeObjectURL(src);
-  return texto.substring(0, 15000);
-}
-
-async function extrairDocx(file) {
-  const buf = await file.arrayBuffer();
-  const r = await mammoth.extractRawText({ arrayBuffer: buf });
-  return (r.value || '').substring(0, 15000);
-}
-
-async function extrairExcel(file) {
-  const buf = await file.arrayBuffer();
-  const wb = XLSX.read(buf, { type: 'array' });
-  let texto = '';
-  wb.SheetNames.forEach(nome => {
-    texto += `[Aba: ${nome}]\n`;
-    texto += XLSX.utils.sheet_to_csv(wb.Sheets[nome]).substring(0, 5000) + '\n\n';
+function switchTabAdmin(el, id) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  ['adm-usuarios','adm-config','adm-bases','adm-logs'].forEach(t => {
+    const e = document.getElementById(t);
+    if (e) e.classList.toggle('hidden', t !== id);
   });
-  return texto.substring(0, 15000);
+  if (id === 'adm-config') carregarAdmConfig();
+  else if (id === 'adm-bases') carregarAdmBases();
+  else if (id === 'adm-logs') carregarAdmLogs();
 }
 
-async function carregarScript(src) {
-  return new Promise((res, rej) => {
-    const s = document.createElement('script');
-    s.src = src; s.onload = res; s.onerror = rej;
-    document.head.appendChild(s);
-  });
+async function carregarAdmUsuarios() {
+  const el = document.getElementById('adm-usuarios');
+  const res = await api('usuarios/listar');
+  if (!res.ok) { el.innerHTML = `<div class="alert alert-danger">${res.erro}</div>`; return; }
+  const usuarios = res.usuarios || [];
+  el.innerHTML = `
+  <div class="flex justify-between items-center mt-2" style="margin-bottom:12px;">
+    <h3 style="font-size:.95rem;">Usuários (${usuarios.length})</h3>
+    <button class="btn btn-primary btn-sm" onclick="mostrarNovoUsuario()"><i class="fa fa-plus"></i> Novo Usuário</button>
+  </div>
+  <table class="admin-table">
+    <thead><tr><th>Nome</th><th>Email</th><th>Perfil</th><th>Status</th><th>Ações</th></tr></thead>
+    <tbody>
+      ${usuarios.map(u => `
+        <tr>
+          <td>${u.nome}</td>
+          <td>${u.email}</td>
+          <td><span class="badge-status">${u.perfil}</span></td>
+          <td><span class="badge-status">${u.ativo !== false ? 'Ativo' : 'Inativo'}</span></td>
+          <td>
+            <button class="btn btn-secondary btn-sm" onclick="mostrarResetSenha('${u.email}')"><i class="fa fa-key"></i></button>
+            <button class="btn btn-danger btn-sm" onclick="removerUsuario('${u.email}')"><i class="fa fa-trash"></i></button>
+          </td>
+        </tr>`).join('')}
+    </tbody>
+  </table>`;
 }
 
-// ============================================================
-// UTILITÁRIOS DE ARQUIVO
-// ============================================================
-async function computarHash(file) {
-  const buf = await file.arrayBuffer();
-  const hash = await crypto.subtle.digest('SHA-256', buf);
-  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,'0')).join('');
-}
-
-function fileToBase64(file) {
-  return new Promise((res, rej) => {
-    const r = new FileReader();
-    r.onload = () => res(r.result.split(',')[1]);
-    r.onerror = rej;
-    r.readAsDataURL(file);
-  });
-}
-
-function fileIcon(nome) {
-  const ext = nome.split('.').pop().toLowerCase();
-  return { pdf:'📄', doc:'📝', docx:'📝', xls:'📊', xlsx:'📊', zip:'📦', txt:'📃' }[ext] || '📎';
-}
-
-// ============================================================
-// MODAIS
-// ============================================================
-function abrirModalAtualizar() {
-  const p = S.processoAtual;
-  if (!p) return;
-  document.getElementById('upd-titulo').value    = p.titulo    || '';
-  document.getElementById('upd-categoria').value = p.categoria || '';
-  document.getElementById('upd-status').value    = p.status    || 'Em andamento';
-  document.getElementById('upd-prioridade').value= p.prioridade|| 'Média';
-  document.getElementById('modal-atualizar').classList.remove('hidden');
-}
-
-async function salvarAtualizacao() {
-  const sei = S.processoAtual?.numero_sei;
-  if (!sei) return;
-  const r = await api('processos/atualizar', 'POST', {
-    numero_sei: sei,
-    titulo:     document.getElementById('upd-titulo').value.trim(),
-    categoria:  document.getElementById('upd-categoria').value.trim(),
-    status:     document.getElementById('upd-status').value,
-    prioridade: document.getElementById('upd-prioridade').value
-  });
-  if (r.sucesso) {
-    toast('Processo atualizado ✓', 'success');
-    fecharModal('modal-atualizar');
-    await abrirProcesso(sei);
-    carregarProcessos();
-  } else toast('Erro: ' + r.erro, 'error');
-}
-
-function abrirModalDocs() {
-  S.modalDocsTargetSei = S.processoAtual?.numero_sei;
-  S.npModalFiles = [];
-  document.getElementById('file-list-modal').innerHTML = '';
-  document.getElementById('modal-docs').classList.remove('hidden');
-}
-
-function abrirModalAndamento() {
-  document.getElementById('upd-andamento').value = '';
-  document.getElementById('modal-andamento').classList.remove('hidden');
-}
-
-async function salvarAndamento() {
-  const sei   = S.processoAtual?.numero_sei;
-  const texto = document.getElementById('upd-andamento').value.trim();
-  if (!sei || !texto) { toast('Informe o texto do andamento', 'error'); return; }
-  const r = await api('andamentos/indexar', 'POST', { numero_sei: sei, texto });
-  if (r.sucesso) {
-    toast(`${r.novos} indexado(s), ${r.ignorados} ignorado(s) ✓`, 'success');
-    fecharModal('modal-andamento');
-    await carregarAndamentos(sei);
-    if (S.ollamaOk) await reanalizar();
-  } else toast('Erro: ' + r.erro, 'error');
-}
-
-function abrirModalAnotacao() {
-  document.getElementById('nova-anotacao').value = '';
-  document.getElementById('modal-anotacao').classList.remove('hidden');
-}
-
-async function salvarAnotacao() {
-  const sei   = S.processoAtual?.numero_sei;
-  const texto = document.getElementById('nova-anotacao').value.trim();
-  if (!sei || !texto) { toast('Escreva sua anotação antes de registrar', 'error'); return; }
-  const r = await api('anotacoes/adicionar', 'POST', { numero_sei: sei, texto });
-  if (r.sucesso) {
-    toast('Anotação registrada ✓', 'success');
-    fecharModal('modal-anotacao');
-    await carregarAnotacoes(sei);
-  } else toast('Erro: ' + r.erro, 'error');
-}
-
-function fecharModal(id) { document.getElementById(id).classList.add('hidden'); }
-
-// Fecha ao clicar fora
-document.querySelectorAll('.modal-overlay').forEach(m => {
-  m.addEventListener('click', e => { if (e.target === m) fecharModal(m.id); });
-});
-
-// ============================================================
-// ADMIN
-// ============================================================
-async function carregarAdmin() {
-  const r = await api('usuarios/listar');
-  const tbody = document.getElementById('users-tbody');
-  if (!r.sucesso) { tbody.innerHTML = '<tr><td colspan="6">Erro ao carregar</td></tr>'; return; }
-
-  tbody.innerHTML = (r.usuarios || []).map(u => `
-    <tr>
-      <td>${u.nome}</td>
-      <td style="color:var(--text2)">${u.email}</td>
-      <td><span class="badge ${u.perfil==='admin'?'badge-maxima':'badge-info'}">${u.perfil}</span></td>
-      <td><span class="badge ${u.ativo?'badge-baixa':'badge-neutral'}">${u.ativo?'Ativo':'Inativo'}</span></td>
-      <td style="color:var(--text2);font-size:13px">${formatarData(u.ultimo_acesso) || '—'}</td>
-      <td>
-        <div class="user-actions">
-          <button class="btn btn-ghost btn-sm" onclick="abrirResetSenha('${u.id}','${escapeHtml(u.nome)}')">
-            <i class="fas fa-key"></i>
-          </button>
-          <button class="btn btn-sm ${u.ativo?'btn-danger':'btn-success'}"
-            onclick="${u.ativo ? `desativarUsuario('${u.id}')` : `reativarUsuario('${u.id}')`}">
-            <i class="fas fa-${u.ativo?'ban':'check'}"></i>
-          </button>
-        </div>
-      </td>
-    </tr>`).join('');
-
-  // Carrega configs
-  const cr = await api('config/listar');
-  if (cr.sucesso) {
-    document.getElementById('cfg-drive-folder').value = cr.config.drive_folder_id || '';
-    document.getElementById('cfg-legal-doc').value    = cr.config.legal_doc_id    || '';
-  }
-}
-
-function abrirModalCriarUsuario() {
-  ['nu-nome','nu-email','nu-senha'].forEach(id => document.getElementById(id).value = '');
-  document.getElementById('modal-criar-usuario').classList.remove('hidden');
+function mostrarNovoUsuario() {
+  criarModal(`
+    <h2>Novo Usuário</h2>
+    <div class="form-group"><label>Nome</label><input id="nu-nome"></div>
+    <div class="form-group"><label>Email</label><input type="email" id="nu-email"></div>
+    <div class="form-group"><label>Senha</label><input type="password" id="nu-senha"></div>
+    <div class="form-group"><label>Perfil</label>
+      <select id="nu-perfil"><option value="usuario">Usuário</option><option value="admin">Admin</option></select>
+    </div>
+    <div id="nu-err" class="hidden alert alert-danger"></div>
+    <div class="flex gap-2">
+      <button class="btn btn-primary" onclick="criarUsuario()">Criar</button>
+      <button class="btn btn-secondary" onclick="fecharModal()">Cancelar</button>
+    </div>`);
 }
 
 async function criarUsuario() {
-  const r = await api('usuarios/criar', 'POST', {
-    nome:   document.getElementById('nu-nome').value.trim(),
-    email:  document.getElementById('nu-email').value.trim(),
-    senha:  document.getElementById('nu-senha').value,
-    perfil: document.getElementById('nu-perfil').value
-  });
-  if (r.sucesso) { toast('Usuário criado ✓', 'success'); fecharModal('modal-criar-usuario'); carregarAdmin(); }
-  else toast('Erro: ' + r.erro, 'error');
+  const nome = document.getElementById('nu-nome').value.trim();
+  const email = document.getElementById('nu-email').value.trim();
+  const senha = document.getElementById('nu-senha').value;
+  const perfil = document.getElementById('nu-perfil').value;
+  const errEl = document.getElementById('nu-err');
+  if (!nome || !email || !senha) { errEl.textContent = 'Preencha todos os campos.'; errEl.classList.remove('hidden'); return; }
+  const senhaHash = await sha256(senha);
+  const res = await api('usuarios/criar', { nome, email, senha: senhaHash, perfil });
+  if (!res.ok) { errEl.textContent = res.erro; errEl.classList.remove('hidden'); return; }
+  fecharModal(); carregarAdmUsuarios();
 }
 
-function abrirResetSenha(id, nome) {
-  document.getElementById('reset-user-id').value   = id;
-  document.getElementById('reset-nome-label').textContent = nome;
-  document.getElementById('reset-nova-senha').value = '';
-  document.getElementById('modal-reset-senha').classList.remove('hidden');
+function mostrarResetSenha(email) {
+  criarModal(`
+    <h2>Redefinir Senha</h2>
+    <p style="margin-bottom:12px;font-size:.85rem;">Usuário: <b>${email}</b></p>
+    <div class="form-group"><label>Nova Senha</label><input type="password" id="ns-senha"></div>
+    <div class="flex gap-2">
+      <button class="btn btn-warning" onclick="resetarSenha('${email}')">Redefinir</button>
+      <button class="btn btn-secondary" onclick="fecharModal()">Cancelar</button>
+    </div>`);
 }
 
-async function confirmarResetSenha() {
-  const r = await api('usuarios/reset-senha', 'POST', {
-    id: document.getElementById('reset-user-id').value,
-    nova_senha: document.getElementById('reset-nova-senha').value
-  });
-  if (r.sucesso) { toast('Senha redefinida ✓', 'success'); fecharModal('modal-reset-senha'); }
-  else toast('Erro: ' + r.erro, 'error');
+async function resetarSenha(email) {
+  const senha = document.getElementById('ns-senha').value;
+  if (!senha) { alert('Digite a nova senha.'); return; }
+  const senhaHash = await sha256(senha);
+  const res = await api('usuarios/reset-senha', { email, senha: senhaHash });
+  if (res.ok) { fecharModal(); alert('Senha redefinida com sucesso.'); }
+  else alert('Erro: ' + res.erro);
 }
 
-async function desativarUsuario(id) {
-  if (!confirm('Desativar este usuário?')) return;
-  const r = await api('usuarios/desativar', 'POST', { id });
-  if (r.sucesso) { toast('Usuário desativado', 'success'); carregarAdmin(); }
-  else toast('Erro: ' + r.erro, 'error');
+async function removerUsuario(email) {
+  if (!confirm(`Remover usuário ${email}?`)) return;
+  const res = await api('usuarios/remover', { email });
+  if (res.ok) carregarAdmUsuarios();
+  else alert('Erro: ' + res.erro);
 }
 
-async function reativarUsuario(id) {
-  const r = await api('usuarios/reativar', 'POST', { id });
-  if (r.sucesso) { toast('Usuário reativado ✓', 'success'); carregarAdmin(); }
-  else toast('Erro: ' + r.erro, 'error');
+async function carregarAdmConfig() {
+  const el = document.getElementById('adm-config');
+  const res = await api('config/listar');
+  const cfg = {};
+  (res.configs || []).forEach(c => { cfg[c.chave] = c.valor; });
+  el.innerHTML = `
+  <h3 style="font-size:.95rem;margin:12px 0;">Configurações do Sistema</h3>
+  <div class="form-group"><label>ID da Pasta no Google Drive</label><input id="cfg-drive" value="${cfg['DRIVE_FOLDER_ID']||''}"></div>
+  <div class="form-group"><label>ID do Documento Legal (Word)</label><input id="cfg-legal" value="${cfg['LEGAL_DOC_ID']||''}"></div>
+  <div class="form-group"><label>Modelo Ollama</label><input id="cfg-ollama" value="${OLLAMA_MODEL}" placeholder="llama3.2:3b"></div>
+  <div id="cfg-status" class="hidden alert alert-success">Configurações salvas.</div>
+  <button class="btn btn-primary" onclick="salvarConfig()"><i class="fa fa-save"></i> Salvar Configurações</button>`;
 }
 
-async function salvarConfigs() {
-  const folderId = document.getElementById('cfg-drive-folder').value.trim();
-  const docId    = document.getElementById('cfg-legal-doc').value.trim();
-  await api('config/salvar', 'POST', { chave: 'drive_folder_id', valor: folderId });
-  await api('config/salvar', 'POST', { chave: 'legal_doc_id', valor: docId });
-  S.legalDoc = ''; // Limpa cache local
-  toast('Configurações salvas ✓', 'success');
+async function salvarConfig() {
+  const driveId = document.getElementById('cfg-drive').value.trim();
+  const legalId = document.getElementById('cfg-legal').value.trim();
+  const ollama = document.getElementById('cfg-ollama').value.trim();
+  if (ollama) { OLLAMA_MODEL = ollama; localStorage.setItem('ollama_model', ollama); }
+  await Promise.all([
+    api('config/salvar', { chave: 'DRIVE_FOLDER_ID', valor: driveId }),
+    api('config/salvar', { chave: 'LEGAL_DOC_ID', valor: legalId })
+  ]);
+  const s = document.getElementById('cfg-status');
+  s.classList.remove('hidden');
+  setTimeout(() => s.classList.add('hidden'), 3000);
 }
 
-// ============================================================
-// CHAT IA FLUTUANTE
-// ============================================================
-let chatOpen = false;
+async function carregarAdmBases() {
+  const el = document.getElementById('adm-bases');
+  const res = await api('bases-legais/status');
+  const status = res.status || {};
+  el.innerHTML = `
+  <div class="alert alert-info" style="margin-bottom:16px;">
+    <i class="fa fa-info-circle"></i> As bases legais são documentos que ensinam a IA sobre legislação de OSS. 
+    Importe arquivos Word/PDF com leis, contratos-modelo e normativas.
+  </div>
+  <div style="background:#f9fafb;border-radius:8px;padding:14px;margin-bottom:16px;font-size:.85rem;">
+    <b>Blocos armazenados:</b> ${status.total_blocos||0} — <b>Documentos:</b> ${status.total_docs||0}
+  </div>
+  <div class="dropzone" id="dz-bases" onclick="document.getElementById('file-bases').click()">
+    <i class="fa fa-balance-scale"></i>
+    <p>Arraste documentos de bases legais ou clique para selecionar</p>
+    <p style="font-size:.75rem;color:var(--muted);">DOCX, PDF, HTML</p>
+  </div>
+  <input type="file" id="file-bases" multiple accept=".pdf,.doc,.docx,.html" style="display:none" onchange="importarBasesLegais(event.target.files)">
+  <div id="bases-progress" class="upload-progress mt-2"></div>
+  <div style="margin-top:12px;">
+    <button class="btn btn-danger btn-sm" onclick="limparBasesLegais()"><i class="fa fa-trash"></i> Limpar todas as bases legais</button>
+  </div>`;
 
+  const dz = document.getElementById('dz-bases');
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+  dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('over'); importarBasesLegais(e.dataTransfer.files); });
+}
+
+async function importarBasesLegais(files) {
+  const prog = document.getElementById('bases-progress');
+  for (const file of Array.from(files)) {
+    addProgItem(prog, file.name, 'proc', 'Extraindo texto...');
+    try {
+      const buf = await file.arrayBuffer();
+      const texto = await extrairTexto(file, buf);
+      if (!texto || texto.trim().length < 50) {
+        updateProgItem(prog, file.name, 'err', 'Sem texto extraído');
+        continue;
+      }
+      const blocos = dividirEmBlocos(texto, BLOCO_MAX);
+      for (let i = 0; i < blocos.length; i++) {
+        await api('bases-legais/salvar', {
+          doc_nome: file.name, bloco_num: i+1, total_blocos: blocos.length, conteudo: blocos[i]
+        });
+      }
+      await api('log/registrar', { acao: 'IMPORTAR_BASE_LEGAL', detalhes: file.name });
+      updateProgItem(prog, file.name, 'ok', `${blocos.length} bloco(s) salvos`);
+    } catch(e) { updateProgItem(prog, file.name, 'err', 'Erro: '+e.message); }
+  }
+}
+
+async function limparBasesLegais() {
+  if (!confirm('Isso removerá TODAS as bases legais. Confirmar?')) return;
+  const res = await api('bases-legais/limpar', {});
+  if (res.ok) { alert('Bases legais removidas.'); carregarAdmBases(); }
+  else alert('Erro: ' + res.erro);
+}
+
+async function carregarAdmLogs() {
+  const el = document.getElementById('adm-logs');
+  const res = await api('log/listar');
+  const logs = (res.logs || []).reverse().slice(0, 200);
+  el.innerHTML = `
+  <h3 style="font-size:.95rem;margin:12px 0;">Log de Ações (últimas ${logs.length})</h3>
+  <table class="admin-table">
+    <thead><tr><th>Data/Hora</th><th>Usuário</th><th>Ação</th><th>Referência</th><th>Detalhes</th></tr></thead>
+    <tbody>
+      ${logs.map(l => `
+        <tr>
+          <td style="white-space:nowrap;">${formatarDataHora(l.data_hora)}</td>
+          <td>${l.usuario||'—'}</td>
+          <td><code style="font-size:.78rem;">${l.acao||''}</code></td>
+          <td>${l.referencia||'—'}</td>
+          <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${l.detalhes||''}</td>
+        </tr>`).join('')}
+    </tbody>
+  </table>`;
+}
+
+// ==================== CHAT FLUTUANTE ====================
 function toggleChat() {
-  chatOpen = !chatOpen;
   const panel = document.getElementById('chat-panel');
-  panel.classList.toggle('hidden', !chatOpen);
-  document.getElementById('chat-notif').classList.add('hidden');
-  if (chatOpen) document.getElementById('chat-input').focus();
+  panel.classList.toggle('open');
 }
 
 async function enviarChat() {
   const input = document.getElementById('chat-input');
-  const msg   = input.value.trim();
+  const msg = input.value.trim();
   if (!msg) return;
   input.value = '';
+  const msgs = document.getElementById('chat-msgs');
+  msgs.innerHTML += `<div class="chat-msg user">${msg}</div>`;
+  msgs.scrollTop = msgs.scrollHeight;
 
-  adicionarMsgChat('user', msg);
+  // Monta contexto dos processos
+  const ctx = todosProcessos.slice(0, 15).map(p =>
+    `SEI ${p.sei}: ${p.titulo} (${p.status}, ${p.prioridade}) — ${p.situacao_atual||''}`
+  ).join('\n');
 
-  const ok = await verificarOllama();
-  if (!ok) {
-    adicionarMsgChat('ai', '⚠️ Ollama não está disponível nesta máquina. Instale e configure conforme o guia de instalação.');
-    return;
-  }
+  const prompt = `Você é um assistente de monitoramento de processos administrativos de uma Organização Social de Saúde.
 
-  const thinking = adicionarMsgChat('ai', '💭 Pensando...', true);
+PROCESSOS EM ACOMPANHAMENTO:
+${ctx || 'Nenhum processo carregado.'}
 
-  // Monta contexto: resumos dos processos
-  let ctx = 'Você é o assistente do sistema SEI Monitor. Responda apenas com base nos dados abaixo.\n\n';
-  ctx += 'PROCESSOS CADASTRADOS:\n';
-  S.processos.slice(0, 30).forEach(p => {
-    ctx += `SEI: ${p.numero_sei} | ${p.titulo||''} | ${p.categoria||''} | ${p.status} | ${p.prioridade}\n`;
-    if (p.resumo_ia) ctx += `Resumo: ${p.resumo_ia.substring(0,200)}\n`;
-    ctx += '\n';
-  });
+PERGUNTA DO USUÁRIO: ${msg}
 
-  if (S.processoAtual) {
-    ctx += `\nPROCESSO ATUAL ABERTO: ${S.processoAtual.numero_sei}\n`;
-    ctx += `Resumo: ${S.processoAtual.resumo_ia||''}\n`;
-    ctx += `Apontamentos: ${S.processoAtual.apontamentos_ia||''}\n`;
-  }
+Responda de forma objetiva e útil em português.`;
 
-  const prompt = `${ctx}\n\nPERGUNTA DO USUÁRIO: ${msg}\n\nResponda de forma clara, objetiva e em português.`;
+  const loadMsg = document.createElement('div');
+  loadMsg.className = 'chat-msg ai';
+  loadMsg.innerHTML = '<span class="spinner"></span>';
+  msgs.appendChild(loadMsg);
+  msgs.scrollTop = msgs.scrollHeight;
 
   try {
-    const resposta = await callOllama(prompt);
-    thinking.remove();
-    adicionarMsgChat('ai', resposta);
-  } catch(e) {
-    thinking.remove();
-    adicionarMsgChat('ai', '❌ Erro ao consultar IA: ' + e.message);
-  }
-}
-
-function adicionarMsgChat(tipo, texto, temp = false) {
-  const msgs = document.getElementById('chat-messages');
-  const div  = document.createElement('div');
-  div.className = `msg msg-${tipo}${temp ? ' thinking' : ''}`;
-  div.textContent = texto;
-  msgs.appendChild(div);
-  msgs.scrollTop = msgs.scrollHeight;
-  return div;
-}
-
-// ============================================================
-// NAVEGAÇÃO
-// ============================================================
-function navTo(view) {
-  ['dashboard','novo-processo','processo','admin'].forEach(v => {
-    document.getElementById(`view-${v}`)?.classList.add('hidden');
-    document.getElementById(`nav-${v === 'dashboard' ? 'dashboard' : v === 'novo-processo' ? 'novo' : v}`
-    )?.classList.remove('active');
-  });
-  document.getElementById(`view-${view}`)?.classList.remove('hidden');
-
-  const topbarTitles = {
-    'dashboard': 'Dashboard',
-    'novo-processo': 'Novo Processo',
-    'admin': 'Administração'
-  };
-  document.getElementById('topbar-title').textContent = topbarTitles[view] || '';
-
-  document.getElementById(`nav-${view === 'dashboard' ? 'dashboard' : view === 'novo-processo' ? 'novo' : view}`)
-    ?.classList.add('active');
-
-  if (view === 'novo-processo') npGoStep(1);
-  if (view === 'admin')         carregarAdmin();
-  if (view === 'dashboard')     filtrarProcessos();
-}
-
-function abaAtiva(nome, btn) {
-  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById(`tab-${nome}`)?.classList.add('active');
-  btn.classList.add('active');
-}
-
-// ============================================================
-// SETUP - OPÇÕES DE PRIORIDADE
-// ============================================================
-function setupPrioOptions() {
-  document.querySelectorAll('.prio-option').forEach(label => {
-    const input = label.querySelector('input');
-    const div   = label.querySelector('div');
-    input?.addEventListener('change', () => {
-      document.querySelectorAll('.prio-option div').forEach(d => {
-        d.style.borderColor = 'transparent';
-      });
-      if (input.checked) {
-        const prio = label.dataset.prio;
-        const cores = { 'Máxima':'var(--maxima)','Alta':'var(--alta)','Média':'var(--media)','Baixa':'var(--baixa)' };
-        div.style.borderColor = cores[prio] || 'var(--accent)';
-      }
+    const ollamaOk = await testarOllama();
+    if (!ollamaOk) { loadMsg.textContent = 'IA não disponível. Verifique o Ollama.'; return; }
+    const resp = await fetch(OLLAMA_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: OLLAMA_MODEL, prompt, stream: false })
     });
-    // Inicializa a selecionada
-    if (input?.checked) input.dispatchEvent(new Event('change'));
-  });
+    const data = await resp.json();
+    loadMsg.textContent = data.response || 'Sem resposta.';
+  } catch(e) {
+    loadMsg.textContent = 'Erro ao contatar IA: ' + e.message;
+  }
+  msgs.scrollTop = msgs.scrollHeight;
 }
 
-// ============================================================
-// UTILITÁRIOS
-// ============================================================
-function toast(msg, tipo = 'success') {
-  const t = document.createElement('div');
-  t.className = `toast ${tipo}`;
-  t.innerHTML = `<i class="fas fa-${tipo === 'success' ? 'check-circle' : 'exclamation-circle'}"></i> ${escapeHtml(msg)}`;
-  document.getElementById('toast-container').appendChild(t);
-  setTimeout(() => t.remove(), 3500);
+// ==================== OLLAMA ====================
+async function testarOllama() {
+  try {
+    const r = await fetch('http://localhost:11434/api/tags', { signal: AbortSignal.timeout(3000) });
+    return r.ok;
+  } catch { return false; }
 }
 
-function formatarData(iso) {
-  if (!iso) return '';
-  try { return new Date(iso).toLocaleDateString('pt-BR'); } catch(e) { return iso; }
+async function verificarOllama() {
+  const dot = document.getElementById('ai-dot');
+  const txt = document.getElementById('ai-status-txt');
+  if (!dot) return;
+  const ok = await testarOllama();
+  dot.className = 'ai-dot ' + (ok ? 'on' : 'off');
+  txt.textContent = ok ? 'IA Local ativa' : 'IA não detectada';
 }
 
-function formatarDataHora(iso) {
-  if (!iso) return '';
-  try { return new Date(iso).toLocaleString('pt-BR'); } catch(e) { return iso; }
+// ==================== MODAL ====================
+function criarModal(html) {
+  fecharModal();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'modal-overlay';
+  overlay.onclick = e => { if (e.target === overlay) fecharModal(); };
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.innerHTML = html;
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+  return overlay;
+}
+function fecharModal() {
+  const m = document.getElementById('modal-overlay');
+  if (m) m.remove();
 }
 
-function formatarBytes(b) {
-  if (!b) return '—';
-  if (b < 1024) return b + ' B';
-  if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
-  return (b/1048576).toFixed(1) + ' MB';
+// ==================== UTILS ====================
+async function sha256(text) {
+  const buf = new TextEncoder().encode(text);
+  return sha256Hex(await crypto.subtle.digest('SHA-256', buf));
 }
-
-function escapeHtml(str) {
-  return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+async function sha256Buf(buf) {
+  return sha256Hex(await crypto.subtle.digest('SHA-256', buf));
+}
+function sha256Hex(hashBuf) {
+  return Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+function bufToBase64(buf) {
+  let binary = '';
+  const bytes = new Uint8Array(buf);
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+function horasDesdeData(dataStr) {
+  if (!dataStr) return 9999;
+  const d = new Date(dataStr);
+  if (isNaN(d)) return 9999;
+  return (Date.now() - d.getTime()) / 3600000;
+}
+function formatarData(s) {
+  if (!s) return '—';
+  const d = new Date(s);
+  if (isNaN(d)) return s;
+  return d.toLocaleDateString('pt-BR');
+}
+function formatarDataHora(s) {
+  if (!s) return '—';
+  const d = new Date(s);
+  if (isNaN(d)) return s;
+  return d.toLocaleString('pt-BR');
+}
+function formatarTamanho(bytes) {
+  if (!bytes) return '';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
+  return (bytes/(1024*1024)).toFixed(1) + ' MB';
+}
+function iconDoc(nome) {
+  if (!nome) return 'fa fa-file';
+  const ext = nome.split('.').pop().toLowerCase();
+  const icons = { pdf: 'fa fa-file-pdf', doc: 'fa fa-file-word', docx: 'fa fa-file-word', xls: 'fa fa-file-excel', xlsx: 'fa fa-file-excel', zip: 'fa fa-file-archive', html: 'fa fa-file-code', htm: 'fa fa-file-code' };
+  return icons[ext] || 'fa fa-file';
 }
 </script>
 </body>
