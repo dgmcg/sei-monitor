@@ -175,8 +175,8 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:16px 0;}
     <input type="url" id="api-url-input" placeholder="https://script.google.com/macros/s/.../exec" style="font-size:.78rem;">
   </div>
   <div class="form-group">
-    <label>Email</label>
-    <input type="email" id="login-email" placeholder="seu@email.com">
+    <label>Usuário</label>
+    <input type="text" id="login-email" placeholder="nome.sobrenome" autocomplete="username" autocapitalize="none">
   </div>
   <div class="form-group">
     <label>Senha</label>
@@ -274,7 +274,7 @@ async function api(path, body = null, method = 'GET') {
 // ==================== AUTH ====================
 async function fazerLogin() {
   const urlInput = document.getElementById('api-url-input').value.trim();
-  const email = document.getElementById('login-email').value.trim();
+  const usuario = document.getElementById('login-email').value.trim().toLowerCase();
   const senha = document.getElementById('login-senha').value;
   const errEl = document.getElementById('login-error');
   errEl.classList.add('hidden');
@@ -282,7 +282,7 @@ async function fazerLogin() {
   API_URL = urlInput;
   localStorage.setItem('sei_api_url', API_URL);
   const senhaHash = await sha256(senha);
-  const res = await api('auth/login', { email, senha: senhaHash });
+  const res = await api('auth/login', { usuario, senha: senhaHash });
   if (!res.ok) { errEl.textContent = res.erro || 'Credenciais inválidas.'; errEl.classList.remove('hidden'); return; }
   sessao = res.sessao;
   usuarioAtual = res.usuario;
@@ -301,7 +301,7 @@ function iniciarApp() {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('sidebar-nome').textContent = usuarioAtual.nome;
-  document.getElementById('sidebar-email').textContent = usuarioAtual.email;
+  document.getElementById('sidebar-email').textContent = usuarioAtual.usuario;
   if (usuarioAtual.perfil === 'admin') document.getElementById('nav-admin').classList.remove('hidden');
   showView('dashboard');
   verificarOllama();
@@ -1187,17 +1187,17 @@ async function carregarAdmUsuarios() {
     <button class="btn btn-primary btn-sm" onclick="mostrarNovoUsuario()"><i class="fa fa-plus"></i> Novo Usuário</button>
   </div>
   <table class="admin-table">
-    <thead><tr><th>Nome</th><th>Email</th><th>Perfil</th><th>Status</th><th>Ações</th></tr></thead>
+    <thead><tr><th>Nome</th><th>Usuário</th><th>Perfil</th><th>Status</th><th>Ações</th></tr></thead>
     <tbody>
       ${usuarios.map(u => `
         <tr>
           <td>${u.nome}</td>
-          <td>${u.email}</td>
+          <td>${u.usuario}</td>
           <td><span class="badge-status">${u.perfil}</span></td>
           <td><span class="badge-status">${u.ativo !== false ? 'Ativo' : 'Inativo'}</span></td>
           <td>
-            <button class="btn btn-secondary btn-sm" onclick="mostrarResetSenha('${u.email}')"><i class="fa fa-key"></i></button>
-            <button class="btn btn-danger btn-sm" onclick="removerUsuario('${u.email}')"><i class="fa fa-trash"></i></button>
+            <button class="btn btn-secondary btn-sm" onclick="mostrarResetSenha('${u.usuario}')"><i class="fa fa-key"></i></button>
+            <button class="btn btn-danger btn-sm" onclick="removerUsuario('${u.usuario}')"><i class="fa fa-trash"></i></button>
           </td>
         </tr>`).join('')}
     </tbody>
@@ -1208,7 +1208,7 @@ function mostrarNovoUsuario() {
   criarModal(`
     <h2>Novo Usuário</h2>
     <div class="form-group"><label>Nome</label><input id="nu-nome"></div>
-    <div class="form-group"><label>Email</label><input type="email" id="nu-email"></div>
+    <div class="form-group"><label>Usuário (nome.sobrenome)</label><input type="text" id="nu-email" placeholder="ex: ivson.galvao" autocapitalize="none"></div>
     <div class="form-group"><label>Senha</label><input type="password" id="nu-senha"></div>
     <div class="form-group"><label>Perfil</label>
       <select id="nu-perfil"><option value="usuario">Usuário</option><option value="admin">Admin</option></select>
@@ -1222,40 +1222,41 @@ function mostrarNovoUsuario() {
 
 async function criarUsuario() {
   const nome = document.getElementById('nu-nome').value.trim();
-  const email = document.getElementById('nu-email').value.trim();
+  const usuario = document.getElementById('nu-email').value.trim().toLowerCase();
   const senha = document.getElementById('nu-senha').value;
   const perfil = document.getElementById('nu-perfil').value;
   const errEl = document.getElementById('nu-err');
-  if (!nome || !email || !senha) { errEl.textContent = 'Preencha todos os campos.'; errEl.classList.remove('hidden'); return; }
+  if (!nome || !usuario || !senha) { errEl.textContent = 'Preencha todos os campos.'; errEl.classList.remove('hidden'); return; }
+  if (!/^[a-z]+\.[a-z]+/.test(usuario)) { errEl.textContent = 'Usuário deve ser no formato nome.sobrenome.'; errEl.classList.remove('hidden'); return; }
   const senhaHash = await sha256(senha);
-  const res = await api('usuarios/criar', { nome, email, senha: senhaHash, perfil });
+  const res = await api('usuarios/criar', { nome, usuario, senha: senhaHash, perfil });
   if (!res.ok) { errEl.textContent = res.erro; errEl.classList.remove('hidden'); return; }
   fecharModal(); carregarAdmUsuarios();
 }
 
-function mostrarResetSenha(email) {
+function mostrarResetSenha(usuario) {
   criarModal(`
     <h2>Redefinir Senha</h2>
-    <p style="margin-bottom:12px;font-size:.85rem;">Usuário: <b>${email}</b></p>
+    <p style="margin-bottom:12px;font-size:.85rem;">Usuário: <b>${usuario}</b></p>
     <div class="form-group"><label>Nova Senha</label><input type="password" id="ns-senha"></div>
     <div class="flex gap-2">
-      <button class="btn btn-warning" onclick="resetarSenha('${email}')">Redefinir</button>
+      <button class="btn btn-warning" onclick="resetarSenha('${usuario}')">Redefinir</button>
       <button class="btn btn-secondary" onclick="fecharModal()">Cancelar</button>
     </div>`);
 }
 
-async function resetarSenha(email) {
+async function resetarSenha(usuario) {
   const senha = document.getElementById('ns-senha').value;
   if (!senha) { alert('Digite a nova senha.'); return; }
   const senhaHash = await sha256(senha);
-  const res = await api('usuarios/reset-senha', { email, senha: senhaHash });
+  const res = await api('usuarios/reset-senha', { usuario, senha: senhaHash });
   if (res.ok) { fecharModal(); alert('Senha redefinida com sucesso.'); }
   else alert('Erro: ' + res.erro);
 }
 
-async function removerUsuario(email) {
-  if (!confirm(`Remover usuário ${email}?`)) return;
-  const res = await api('usuarios/remover', { email });
+async function removerUsuario(usuario) {
+  if (!confirm(`Remover usuário ${usuario}?`)) return;
+  const res = await api('usuarios/remover', { usuario });
   if (res.ok) carregarAdmUsuarios();
   else alert('Erro: ' + res.erro);
 }
