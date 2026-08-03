@@ -273,8 +273,11 @@ async function api(path, body = null) {
   } else {
     opts.method = 'GET';
   }
-  const r = await fetch(url, opts);
-  const text = await r.text();
+  let r, text;
+  try {
+    r = await fetch(url, opts);
+    text = await r.text();
+  } catch(e) { return { ok: false, erro: 'Erro de rede: ' + e.message }; }
   try { return JSON.parse(text); } catch { return { ok: false, erro: text }; }
 }
 
@@ -333,20 +336,19 @@ async function renderDashboard() {
   content.innerHTML = '<div class="text-muted"><span class="spinner"></span> Carregando processos...</div>';
 
   // Carrega processos
-  const res = await api('processos/listar');
-  if (!res.ok) { content.innerHTML = `<div class="alert alert-danger">${res.erro}</div>`; return; }
+  let res;
+  try { res = await api('processos/listar'); } catch(e) { res = { ok: false, erro: e.message }; }
+  if (!res.ok) { content.innerHTML = `<div class="alert alert-danger">${res.erro || 'Erro ao carregar processos.'}</div>`; return; }
   todosProcessos = res.processos || [];
 
-  // Verifica resumo geral (twice-daily)
-  await verificarEGerarResumoGeral();
-
+  // Monta a UI imediatamente (não bloqueia no resumo geral)
   content.innerHTML = '';
 
-  // Resumo geral
+  // Resumo geral — placeholder que será preenchido em background
   const rgBox = document.createElement('div');
   rgBox.id = 'resumo-geral-container';
+  rgBox.innerHTML = '<div class="resumo-geral-box" style="opacity:.5;"><div class="rg-header"><h3><i class="fa fa-brain" style="color:var(--primary);"></i> Resumo do Período</h3></div><div class="rg-content text-muted"><span class="spinner"></span> Verificando resumo...</div></div>';
   content.appendChild(rgBox);
-  await renderResumoGeral(rgBox);
 
   // Filtros rápidos
   const filtros = document.createElement('div');
@@ -368,6 +370,18 @@ async function renderDashboard() {
   grid.id = 'cards-grid';
   content.appendChild(grid);
   renderCards(todosProcessos, grid);
+
+  // Resumo geral em background — não bloqueia a renderização dos cards
+  (async () => {
+    try {
+      await verificarEGerarResumoGeral();
+      const rgBoxAtual = document.getElementById('resumo-geral-container');
+      if (rgBoxAtual) await renderResumoGeral(rgBoxAtual);
+    } catch(e) {
+      const rgBoxAtual = document.getElementById('resumo-geral-container');
+      if (rgBoxAtual) rgBoxAtual.innerHTML = '';
+    }
+  })();
 }
 
 function renderCards(lista, grid) {
@@ -530,9 +544,15 @@ async function abrirProcesso(sei) {
         <div style="font-size:.75rem;color:var(--muted);font-weight:600;">SEI: ${proc.sei}</div>
         <h2 style="font-size:1.1rem;margin-top:2px;">${proc.titulo}</h2>
       </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
         <span class="badge-prioridade ${(proc.prioridade||'').replace('á','a').replace('é','e')}">${proc.prioridade}</span>
         <span class="badge-status">${proc.status}</span>
+        ${proc.link_sei
+          ? `<span style="display:inline-flex;gap:4px;">
+               <a href="${proc.link_sei}" target="_blank" class="btn btn-secondary btn-sm" title="Abrir processo no SEI (requer login se sessão expirou)"><i class="fa fa-external-link-alt"></i> Abrir no SEI</a>
+               <button class="btn btn-secondary btn-sm" onclick="definirLinkSEI('${sei}')" title="Atualizar link SEI" style="padding:4px 8px;"><i class="fa fa-sync-alt"></i></button>
+             </span>`
+          : `<button class="btn btn-secondary btn-sm" onclick="definirLinkSEI('${sei}')" title="Cole o link do processo copiado do SEI — o sistema salva as partes permanentes"><i class="fa fa-link"></i> Link SEI</button>`}
       </div>
     </div>
     ${proc.situacao_atual ? `<div class="situacao" style="margin-bottom:10px;">${proc.situacao_atual}</div>` : ''}
@@ -569,18 +589,22 @@ async function abrirProcesso(sei) {
 
   <div id="tab-documentos" class="hidden">
     <div class="flex gap-2" style="margin-bottom:12px;">
-      <button class="btn btn-primary btn-sm" onclick="mostrarUpload('${sei}')"><i class="fa fa-upload"></i> Enviar Documentos</button>
+      <button class="btn btn-primary btn-sm" onclick="mostrarUpload('${sei}')"><i class="fa fa-upload"></i> Importar Documentos</button>
     </div>
     <div id="lista-documentos">
       ${documentos.length ? documentos.map(d => `
         <div class="doc-item">
-          <i class="${iconDoc(d.nome_original)}"></i>
-          <div>
-            <div class="doc-name">${d.nome_original}</div>
-            <div class="doc-meta">${formatarData(d.data_upload)} — ${d.usuario||''} — ${d.tamanho ? formatarTamanho(d.tamanho) : ''}</div>
+          <i class="${iconDoc(d.nome_arquivo)}"></i>
+          <div style="flex:1;">
+            <div class="doc-name">${d.nome_arquivo}</div>
+            <div class="doc-meta">${formatarData(d.data_upload)} — ${d.usuario_upload||''} — ${d.tamanho ? formatarTamanho(d.tamanho) : 'texto extraído'}</div>
           </div>
-          <a href="${d.url_drive||'#'}" target="_blank" class="btn btn-secondary btn-sm"><i class="fa fa-external-link-alt"></i></a>
-        </div>`).join('') : '<p class="text-muted">Nenhum documento enviado.</p>'}
+          ${d.link_verificacao
+            ? `<a href="${d.link_verificacao}" target="_blank" class="btn btn-secondary btn-sm" title="Verificar documento no SEI (link público, sem login)"><i class="fa fa-check-circle"></i> SEI</a>`
+            : d.link_sei
+              ? `<a href="${d.link_sei}" target="_blank" class="btn btn-secondary btn-sm" title="Abrir no SEI"><i class="fa fa-external-link-alt"></i></a>`
+              : ''}
+        </div>`).join('') : '<p class="text-muted">Nenhum documento importado.</p>'}
     </div>
   </div>
 
@@ -706,14 +730,83 @@ async function processarAndamentos(sei) {
   setTimeout(() => { fecharModal(); abrirProcesso(sei); }, 1500);
 }
 
+// ==================== UTILITÁRIOS LINK SEI ====================
+
+// Extrai o código verificador do nome do arquivo SEI
+// Formato: [seq]-{CODIGO}_{ORGAO}___{TIPO}_{NUM}.{ext}
+function extrairCodigoSEI(nomeArquivo) {
+  const m = nomeArquivo.match(/\[\d+\]-(\d{6,})[_\.]/);
+  return m ? m[1] : null;
+}
+
+// Extrai o CRC do texto extraído do documento
+function extrairCRCSEI(texto) {
+  const m = texto.match(/c[oó]digo\s+CRC\s+([A-F0-9]{6,})/i);
+  return m ? m[1] : null;
+}
+
+// Extrai a URL base do SEI do conteúdo do documento
+// Ex: "http://sei.pe.gov.br/sei/controlador_externo.php..." → "https://sei.pe.gov.br/sei"
+function extrairUrlBaseSEI(texto) {
+  const m = texto.match(/(https?:\/\/[^\s\/]+\/sei)\/controlador_externo/i);
+  if (m) return m[1];
+  // tenta também na URL do link href
+  const m2 = texto.match(/href="(https?:\/\/[^\s"\/]+\/sei)\/controlador/i);
+  return m2 ? m2[1] : null;
+}
+
+// Monta o link público de verificação (funciona sem login)
+function buildLinkVerificacao(baseUrl, codigo, crc) {
+  if (!codigo) return null;
+  const base = baseUrl || localStorage.getItem('sei_base_url') || 'https://sei.pe.gov.br/sei';
+  let url = `${base}/controlador_externo.php?acao=documento_conferir&id_orgao_acesso_externo=0&codigo_verificador=${codigo}`;
+  if (crc) url += `&crc=${crc}`;
+  return url;
+}
+
+// Constrói link do processo sem o infra_hash (que expira)
+// Mantém id_procedimento, infra_sistema, infra_unidade_atual
+function buildLinkProcessoEstavel(url) {
+  try {
+    const u = new URL(url);
+    const p = new URLSearchParams(u.search);
+    p.delete('infra_hash');
+    p.delete('acao_origem');
+    p.delete('acao_retorno');
+    return u.origin + u.pathname + '?' + p.toString();
+  } catch(e) { return url; }
+}
+
+// ==================== LINK SEI DO PROCESSO ====================
+async function definirLinkSEI(sei) {
+  const link = prompt('Cole o link do processo no portal SEI:\n(ex: https://sei.pe.gov.br/sei/controlador.php?acao=procedimento_trabalhar&id_procedimento=...)\n\nCopie diretamente do navegador enquanto estiver com o processo aberto no SEI.');
+  if (link === null) return; // cancelou
+  const linkTrimado = link.trim();
+  // Remove infra_hash (expira por sessão), mantém id_procedimento e demais parâmetros estáveis
+  const linkEstavel = buildLinkProcessoEstavel(linkTrimado);
+  // Salva também a URL base do SEI para uso nos links de documentos
+  try {
+    const u = new URL(linkTrimado);
+    const baseUrl = u.origin + '/sei';
+    localStorage.setItem('sei_base_url', baseUrl);
+  } catch(e) {}
+  const res = await api('processos/atualizar', { numero_sei: sei, link_sei: linkEstavel });
+  if (res.ok) abrirProcesso(sei);
+  else alert('Erro ao salvar: ' + (res.erro || 'Falha'));
+}
+
 // ==================== UPLOAD DOCUMENTOS ====================
 function mostrarUpload(sei) {
   criarModal(`
-    <h2><i class="fa fa-upload"></i> Enviar Documentos</h2>
+    <h2><i class="fa fa-file-import"></i> Importar Documentos</h2>
+    <p style="font-size:.82rem;color:var(--muted);margin-bottom:12px;">
+      O texto é extraído e salvo no banco de dados para análise da IA. Os arquivos originais não são armazenados.<br>
+      <i class="fa fa-magic" style="color:var(--primary);"></i> <b>Links de verificação SEI gerados automaticamente</b> a partir dos nomes dos arquivos.
+    </p>
     <div class="dropzone" id="dropzone-area" onclick="document.getElementById('file-input-hidden').click()">
-      <i class="fa fa-cloud-upload-alt"></i>
+      <i class="fa fa-file-import"></i>
       <p>Arraste arquivos aqui ou clique para selecionar</p>
-      <p style="font-size:.75rem;color:var(--muted);">PDF, DOCX, XLSX, XLS, ZIP, HTML</p>
+      <p style="font-size:.75rem;color:var(--muted);">PDF, DOCX, XLSX, XLS, HTML, ZIP</p>
     </div>
     <input type="file" id="file-input-hidden" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.zip,.html" style="display:none" onchange="processarArquivos(event.target.files,'${sei}')">
     <div id="upload-progress" class="upload-progress mt-2"></div>
@@ -744,22 +837,22 @@ async function processarArquivos(files, sei) {
             todosArquivos.push(file2);
           }
         }
-        updateProgItem(prog, f.name, 'ok', `ZIP extraído`);
+        updateProgItem(prog, f.name, 'ok', 'ZIP extraído');
       } catch(e) { updateProgItem(prog, f.name, 'err', 'Erro ao extrair ZIP'); }
     } else {
       todosArquivos.push(f);
     }
   }
 
-  // Processar cada arquivo
+  // Processar cada arquivo (sem Drive — apenas texto + metadados)
   for (const file of todosArquivos) {
     addProgItem(prog, file.name, 'proc', 'Verificando...');
     try {
       const buf = await file.arrayBuffer();
       const hash = await sha256Buf(buf);
 
-      // Verificar duplicata global
-      const resHash = await api('documentos/verificar-hash?hash=' + hash + '&sei=' + sei);
+      // Verificar duplicata
+      const resHash = await api('documentos/verificar-hash', { numero_sei: sei, hash: hash });
       if (resHash.existe) {
         updateProgItem(prog, file.name, 'dup', 'Duplicata ignorada');
         continue;
@@ -768,24 +861,36 @@ async function processarArquivos(files, sei) {
       updateProgItem(prog, file.name, 'proc', 'Extraindo texto...');
       const texto = await extrairTexto(file, buf);
 
-      updateProgItem(prog, file.name, 'proc', 'Enviando para Drive...');
-      const base64 = bufToBase64(buf);
-      const resUp = await api('documentos/upload', {
-        sei, nome_original: file.name, hash, base64,
-        mime: file.type || 'application/octet-stream'
-      });
-      if (!resUp.ok) { updateProgItem(prog, file.name, 'err', resUp.erro || 'Falha upload'); continue; }
+      // Auto-detectar link de verificação SEI a partir do nome e conteúdo
+      const codigoSEI = extrairCodigoSEI(file.name);
+      const crcSEI = texto ? extrairCRCSEI(texto) : null;
+      // Detectar e salvar URL base do SEI a partir do HTML (melhora precisão)
+      if (texto && file.name.toLowerCase().match(/\.(html?)/)) {
+        const detectedBase = extrairUrlBaseSEI(texto);
+        if (detectedBase) localStorage.setItem('sei_base_url', detectedBase);
+      }
+      const linkVerificacao = buildLinkVerificacao(null, codigoSEI, crcSEI);
 
-      const docId = resUp.doc_id;
+      // Registrar metadados (sem Drive)
+      const resReg = await api('documentos/registrar', {
+        numero_sei: sei,
+        nome_arquivo: file.name,
+        hash_arquivo: hash,
+        tamanho: file.size,
+        link_verificacao: linkVerificacao || ''
+      });
+      if (!resReg.ok) { updateProgItem(prog, file.name, 'err', resReg.erro || 'Falha ao registrar'); continue; }
+
+      const docId = resReg.doc_id;
 
       // Salvar blocos de texto no Sheets
       if (texto && texto.trim().length > 0) {
-        updateProgItem(prog, file.name, 'proc', 'Salvando texto em Sheets...');
+        updateProgItem(prog, file.name, 'proc', 'Salvando texto...');
         await salvarBlocosSheets(sei, docId, file.name, texto);
       }
 
-      await api('log/registrar', { acao: 'UPLOAD_DOCUMENTO', referencia: sei, detalhes: file.name });
-      updateProgItem(prog, file.name, 'ok', 'Enviado com sucesso');
+      await api('log/registrar', { acao: 'IMPORTAR_DOCUMENTO', referencia: sei, detalhes: file.name });
+      updateProgItem(prog, file.name, 'ok', texto ? 'Importado — texto extraído' : 'Importado — sem texto');
     } catch(e) {
       updateProgItem(prog, file.name, 'err', 'Erro: ' + e.message);
     }
@@ -1223,21 +1328,28 @@ async function cadastrarProcesso() {
   if (!res.ok) { statusEl.innerHTML = `<div class="alert alert-danger">${res.erro}</div>`; return; }
   await api('log/registrar', { acao: 'CRIAR_PROCESSO', referencia: novoProc.sei, detalhes: novoProc.titulo });
 
-  // Upload de documentos
+  // Importar documentos (extração de texto — sem Drive)
   if (novoProc._files && novoProc._files.length > 0) {
-    statusEl.innerHTML = '<span class="spinner"></span> Enviando documentos...';
+    statusEl.innerHTML = '<span class="spinner"></span> Importando documentos...';
     for (const file of Array.from(novoProc._files)) {
       try {
         const buf = await file.arrayBuffer();
         const hash = await sha256Buf(buf);
         const texto = await extrairTexto(file, buf);
-        const base64 = bufToBase64(buf);
-        const resUp = await api('documentos/upload', {
-          sei: novoProc.sei, nome_original: file.name, hash, base64,
-          mime: file.type || 'application/octet-stream'
+        const codigoSEI = extrairCodigoSEI(file.name);
+        const crcSEI = texto ? extrairCRCSEI(texto) : null;
+        if (texto && file.name.toLowerCase().match(/\.html?/)) {
+          const detectedBase = extrairUrlBaseSEI(texto);
+          if (detectedBase) localStorage.setItem('sei_base_url', detectedBase);
+        }
+        const linkVerificacao = buildLinkVerificacao(null, codigoSEI, crcSEI);
+        const resReg = await api('documentos/registrar', {
+          numero_sei: novoProc.sei, nome_arquivo: file.name,
+          hash_arquivo: hash, tamanho: file.size,
+          link_verificacao: linkVerificacao || ''
         });
-        if (resUp.ok && texto) await salvarBlocosSheets(novoProc.sei, resUp.doc_id, file.name, texto);
-      } catch(e) { console.warn('Erro ao enviar', file.name, e); }
+        if (resReg.ok && texto) await salvarBlocosSheets(novoProc.sei, resReg.doc_id, file.name, texto);
+      } catch(e) { console.warn('Erro ao importar', file.name, e); }
     }
   }
 
