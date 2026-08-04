@@ -265,18 +265,22 @@ RESUMO GERENCIAL — ${turno.toUpperCase()}:`;
 }
 
 async function renderResumoGeral(container) {
-  const periodo = getPeriodo(); if (!periodo) { container.innerHTML = ''; return; }
-  const res    = await api('resumo-geral/obter?periodo=' + periodo);
-  const turno  = periodo === 'manha' ? '🌅 Resumo da Manhã' : '🌇 Resumo da Tarde';
-  const conteudo = res.ok && res.resumo ? res.resumo.conteudo : null;
-  const horario  = res.ok && res.resumo ? res.resumo.data_hora : null;
+  // Tenta mostrar o resumo mais recente do dia — tarde tem prioridade sobre manhã
+  // A exibição não depende do horário atual; só a geração é restrita ao período
+  let resumo = null, periodo = null;
+  for (const p of ['tarde', 'manha']) {
+    const res = await api('resumo-geral/obter?periodo=' + p);
+    if (res.ok && res.resumo?.conteudo) { resumo = res.resumo; periodo = p; break; }
+  }
+  if (!resumo) { container.innerHTML = ''; return; }
+  const turno = periodo === 'manha' ? '🌅 Resumo da Manhã' : '🌇 Resumo da Tarde';
   container.innerHTML = `
   <div class="resumo-geral-box">
     <div class="rg-header">
       <h3><i class="fa fa-brain" style="color:var(--primary);"></i> ${turno}</h3>
-      <span class="rg-meta">${horario ? 'Gerado às '+formatarDataHora(horario) : 'Aguardando geração...'}</span>
+      <span class="rg-meta">Gerado às ${formatarDataHora(resumo.data_hora)}</span>
     </div>
-    <div class="rg-content">${conteudo || '<span class="text-muted">Resumo ainda não gerado para este período.</span>'}</div>
+    <div class="rg-content">${resumo.conteudo}</div>
   </div>`;
 }
 
