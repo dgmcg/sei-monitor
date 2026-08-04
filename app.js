@@ -1,29 +1,31 @@
 // ============================================================
-// SEI Monitor v2.1 — app.js
+// SEI Monitor v2.2 — app.js
 // ============================================================
 
 // ==================== CONFIG ====================
-const LIMITE_HORAS = { 'Máxima': 2, 'Alta': 24, 'Média': 48, 'Baixa': 96 };
+const LIMITE_HORAS = { 'Máxima': 48, 'Alta': 96, 'Média': 168, 'Baixa': 336 };
 const OLLAMA_URL   = 'http://localhost:11434/api/generate';
 let   OLLAMA_MODEL = localStorage.getItem('ollama_model') || 'llama3.2:3b';
 const BLOCO_MAX    = 49000;
 const RELEVANCIA_MAX_CHARS = 25000;
 
 // ==================== STATE ====================
-let API_URL       = '';
-let sessao        = null;
-let usuarioAtual  = null;
+let API_URL        = '';
+let sessao         = null;
+let usuarioAtual   = null;
 let todosProcessos = [];
 
 // ==================== INIT ====================
 window.onload = () => {
   API_URL = localStorage.getItem('sei_api_url') || '';
   if (API_URL) document.getElementById('api-url-input').value = API_URL;
+  // Chat só aparece após login
+  const chatFab = document.getElementById('chat-fab');
+  if (chatFab) chatFab.style.display = 'none';
   verificarOllama();
 };
 
 // ==================== API ====================
-// FIX: detecta resposta HTML (página de erro/proteção do GAS) e exibe mensagem amigável
 async function api(path, body = null) {
   const [basePath, queryStr] = path.split('?');
   let url = API_URL + (API_URL.includes('?') ? '&' : '?') + 'path=' + encodeURIComponent(basePath);
@@ -45,11 +47,10 @@ async function api(path, body = null) {
   try {
     return JSON.parse(text);
   } catch {
-    // Resposta não é JSON — provavelmente página HTML de erro ou proteção
     const isHtml = text.trimStart().startsWith('<');
     if (isHtml) {
-      console.error('API retornou HTML em vez de JSON:', text.substring(0, 300));
-      return { ok: false, erro: 'O servidor retornou uma resposta inesperada. Verifique se a URL do Apps Script está correta e tente novamente.' };
+      console.error('API retornou HTML:', text.substring(0, 300));
+      return { ok: false, erro: 'O servidor retornou uma resposta inesperada. Verifique a URL do Apps Script.' };
     }
     return { ok: false, erro: text.substring(0, 200) };
   }
@@ -79,6 +80,8 @@ function logout() {
   sessao = null; usuarioAtual = null;
   document.getElementById('app').classList.add('hidden');
   document.getElementById('login-screen').style.display = '';
+  const chatFab = document.getElementById('chat-fab');
+  if (chatFab) { chatFab.style.display = 'none'; }
 }
 
 function iniciarApp() {
@@ -87,6 +90,9 @@ function iniciarApp() {
   document.getElementById('sidebar-nome').textContent  = usuarioAtual.nome;
   document.getElementById('sidebar-email').textContent = usuarioAtual.usuario;
   if (usuarioAtual.perfil === 'admin') document.getElementById('nav-admin').classList.remove('hidden');
+  // Mostrar chat após login
+  const chatFab = document.getElementById('chat-fab');
+  if (chatFab) chatFab.style.display = '';
   carregarDadosFixos();
   showView('dashboard');
   verificarOllama();
@@ -110,9 +116,18 @@ async function renderDashboard() {
   content.innerHTML = '<div class="text-muted"><span class="spinner"></span> Carregando processos...</div>';
   let res;
   try { res = await api('processos/listar'); } catch(e) { res = { ok: false, erro: e.message }; }
-  if (!res.ok) { content.innerHTML = `<div class="alert alert-danger">${res.erro || 'Erro ao carregar processos.'}</div>`; return; }
+  if (!res.ok) { content.innerHTML = `<div class="alert alert-danger">${res.erro || 'Erro ao carregar.'}</div>`; return; }
   todosProcessos = res.processos || [];
   content.innerHTML = '';
+
+  // Banner de alerta para processos com prioridade Máxima em andamento
+  const urgentes = todosProcessos.filter(p => p.prioridade === 'Máxima' && p.status === 'Em andamento');
+  if (urgentes.length) {
+    const banner = document.createElement('div');
+    banner.style.cssText = 'background:#7c3aed;color:#fff;border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:.85rem;';
+    banner.innerHTML = `<i class="fa fa-exclamation-triangle"></i> <b>${urgentes.length} processo(s) com PRIORIDADE MÁXIMA</b> em andamento: ${urgentes.map(p => `<a onclick="abrirProcesso('${p.numero_sei}')" style="color:#e9d5ff;cursor:pointer;text-decoration:underline;">${p.numero_sei}</a>`).join(', ')}`;
+    content.appendChild(banner);
+  }
 
   const rgBox = document.createElement('div');
   rgBox.id = 'resumo-geral-container';
@@ -156,33 +171,34 @@ function renderCards(lista, grid) {
 }
 
 function criarCard(p) {
-  const sei = p.numero_sei;  // FIX: era p.numero_sei || p.sei
+  const sei = p.numero_sei;
   const div = document.createElement('div');
   div.className = 'process-card';
   const horas  = horasDesdeData(p.data_atualizacao || p.data_cadastro);
-  const limite = LIMITE_HORAS[p.prioridade] || 96;
+  const limite = LIMITE_HORAS[p.prioridade] || 336;
   const atrasado = horas > limite;
-  if (atrasado) {
-    if (p.prioridade === 'Máxima') div.classList.add('alerta-maxima');
-    else if (p.prioridade === 'Alta')  div.classList.add('alerta-alta');
+  // Máxima sempre recebe destaque visual
+  if (p.prioridade === 'Máxima') div.classList.add('alerta-maxima');
+  else if (atrasado) {
+    if (p.prioridade === 'Alta')  div.classList.add('alerta-alta');
     else if (p.prioridade === 'Média') div.classList.add('alerta-media');
   }
   const priBadge = (p.prioridade || '').replace('á','a').replace('é','e');
   div.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:flex-start;">
       <div class="sei-num">SEI: ${sei}</div>
-      <button onclick="deletarProcessoCard(event,'${sei}')" title="Excluir processo"
+      <button onclick="deletarProcessoCard(event,'${sei}')" title="Excluir"
         style="background:none;border:none;cursor:pointer;color:#d1d5db;font-size:.85rem;padding:0;">
         <i class="fa fa-trash"></i>
       </button>
     </div>
     <div class="titulo">${p.titulo}</div>
-    ${p.situacao_atual ? `<div class="situacao">${p.situacao_atual}</div>` : ''}
-    ${p.ultimo_andamento_resumo ? `<div class="ultimo-and"><i class="fa fa-clock" style="margin-right:4px;color:var(--muted);"></i>${p.ultimo_andamento_resumo}${p.ultimo_andamento_data ? ' <small>('+formatarData(p.ultimo_andamento_data)+')</small>' : ''}</div>` : ''}
+    ${p.situacao_atual ? `<div class="situacao" style="font-size:.84rem;">${p.situacao_atual}</div>` : ''}
+    ${p.ultimo_andamento_resumo ? `<div class="ultimo-and"><i class="fa fa-clock" style="margin-right:4px;color:var(--muted);"></i>${p.ultimo_andamento_resumo}${p.ultimo_andamento_data ? ' <small>('+formatarDataGAS(p.ultimo_andamento_data)+')</small>' : ''}</div>` : ''}
     <div class="card-footer">
       <span class="badge-prioridade ${priBadge}">${p.prioridade}</span>
       <span class="badge-status">${p.status}</span>
-      ${atrasado ? `<span style="color:${p.prioridade==='Máxima'?'#7c3aed':p.prioridade==='Alta'?'#dc2626':'#ca8a04'};font-size:.72rem;font-weight:600;">⚠ Atrasado</span>` : ''}
+      ${p.prioridade==='Máxima' ? `<span style="color:#7c3aed;font-size:.72rem;font-weight:700;">⚠ URGENTE</span>` : atrasado ? `<span style="color:${p.prioridade==='Alta'?'#dc2626':'#ca8a04'};font-size:.72rem;font-weight:600;">⚠ Atrasado</span>` : ''}
     </div>`;
   div.onclick = () => abrirProcesso(sei);
   return div;
@@ -227,11 +243,19 @@ async function verificarEGerarResumoGeral() {
   if (res.ok && res.resumo?.conteudo) return;
   const ollamaOk = await testarOllama(); if (!ollamaOk) return;
   if (!todosProcessos.length) return;
-  const lista  = todosProcessos.slice(0, 20).map(p =>
-    `SEI ${p.numero_sei}: ${p.titulo} (${p.status}, ${p.prioridade}) — ${p.situacao_atual || 'sem situação atual'}`
+  const lista = todosProcessos.slice(0, 20).map(p =>
+    `SEI ${p.numero_sei}: ${p.titulo} (${p.status}, Prioridade ${p.prioridade}, Unidade: ${p.unidade||'—'}) — ${p.situacao_atual || p.resumo_ia || 'sem análise'}`
   ).join('\n');
-  const turno  = periodo === 'manha' ? 'manhã' : 'tarde';
-  const prompt = `Você é analista de processos administrativos de uma Organização Social de Saúde.\nGere um resumo gerencial de ${turno} sobre os processos abaixo. Identifique prioridades críticas, processos em risco e pontos de atenção.\nSeja objetivo, máx 300 palavras.\n\nPROCESSOS:\n${lista}\n\nRESUMO GERENCIAL DE ${turno.toUpperCase()}:`;
+  const turno = periodo === 'manha' ? 'manhã' : 'tarde';
+  const prompt = `Você é especialista em gestão de contratos de Organização Social de Saúde (OSS) e processos administrativos do setor público de saúde.
+Gere um resumo gerencial de ${turno} sobre os processos monitorados abaixo.
+Identifique: processos críticos (prioridade Máxima/Alta), riscos contratuais, pontos de atenção imediata e recomendações de gestão.
+Seja objetivo, máx 300 palavras. Use linguagem executiva.
+
+PROCESSOS MONITORADOS:
+${lista}
+
+RESUMO GERENCIAL — ${turno.toUpperCase()}:`;
   try {
     const resp = await fetch(OLLAMA_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ model:OLLAMA_MODEL, prompt, stream:false }) });
     const data = await resp.json();
@@ -272,63 +296,108 @@ async function abrirProcesso(sei) {
   ]);
 
   if (!resP.ok) { content.innerHTML = `<div class="alert alert-danger">${resP.erro}</div>`; return; }
-  const proc        = resP.processo;
-  const andamentos  = resA.andamentos  || [];
-  const documentos  = resD.documentos  || [];
-  const anotacoes   = resAnot.anotacoes || [];
+  const proc       = resP.processo;
+  const andamentos = (resA.andamentos || []).sort((a,b) => new Date(b.data_movimento) - new Date(a.data_movimento));
+  const documentos = resD.documentos  || [];
+  const anotacoes  = (resAnot.anotacoes || []).sort((a,b) => new Date(b.data_hora) - new Date(a.data_hora));
   const verificacoes = resVer.verificacoes || [];
+  const ultimaAnotacao = anotacoes[0] || null;
+
+  const priBadge = (proc.prioridade||'').replace('á','a').replace('é','e');
+  const temIA = proc.resumo_ia || proc.situacao_atual;
 
   content.innerHTML = `
   <div style="margin-bottom:16px;">
     <button class="btn btn-secondary btn-sm" onclick="showView('dashboard')"><i class="fa fa-arrow-left"></i> Voltar</button>
   </div>
+
   <div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px;">
-    <div class="flex justify-between items-center" style="margin-bottom:12px;">
-      <div>
-        <div style="font-size:.75rem;color:var(--muted);font-weight:600;">SEI: ${proc.numero_sei}</div>
-        <h2 style="font-size:1.1rem;margin-top:2px;">${proc.titulo}</h2>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:10px;">
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:.75rem;color:var(--muted);font-weight:600;margin-bottom:2px;">SEI: ${proc.numero_sei}</div>
+        <h2 style="font-size:1.15rem;margin:0;line-height:1.3;">${proc.titulo}</h2>
       </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-        <span class="badge-prioridade ${(proc.prioridade||'').replace('á','a').replace('é','e')}">${proc.prioridade}</span>
-        <span class="badge-status">${proc.status}</span>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+        <span class="badge-prioridade ${priBadge}">${proc.prioridade||'—'}</span>
+        <span class="badge-status">${proc.status||'—'}</span>
         ${proc.link_sei
-          ? `<span style="display:inline-flex;gap:4px;">
-               <a href="${proc.link_sei}" target="_blank" class="btn btn-secondary btn-sm" title="Abrir processo no SEI"><i class="fa fa-external-link-alt"></i> Abrir no SEI</a>
-               <button class="btn btn-secondary btn-sm" onclick="definirLinkSEI('${sei}')" title="Atualizar link SEI" style="padding:4px 8px;"><i class="fa fa-sync-alt"></i></button>
-             </span>`
+          ? `<a href="${proc.link_sei}" target="_blank" class="btn btn-secondary btn-sm"><i class="fa fa-external-link-alt"></i> Abrir no SEI</a>
+             <button class="btn btn-secondary btn-sm" onclick="definirLinkSEI('${sei}')" title="Atualizar link" style="padding:4px 8px;"><i class="fa fa-sync-alt"></i></button>`
           : `<button class="btn btn-secondary btn-sm" onclick="definirLinkSEI('${sei}')"><i class="fa fa-link"></i> Link SEI</button>`}
+        <button class="btn btn-secondary btn-sm" onclick="editarProcesso('${sei}')" title="Editar processo"><i class="fa fa-edit"></i> Editar</button>
+        <button class="btn btn-warning btn-sm" onclick="registrarSemMovimentacao('${sei}')" title="Registrar: sem movimentação"><i class="fa fa-check-circle"></i> Sem Movim.</button>
       </div>
     </div>
-    ${proc.situacao_atual ? `<div class="situacao" style="margin-bottom:10px;">${proc.situacao_atual}</div>` : ''}
-    <div style="font-size:.82rem;color:var(--muted);display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;">
+
+    ${ultimaAnotacao ? `
+    <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:6px;padding:8px 12px;margin-bottom:10px;font-size:.83rem;">
+      <span style="color:#15803d;font-weight:600;"><i class="fa fa-pen"></i> Atualização de Gestão</span>
+      <span style="color:#6b7280;margin:0 6px;">•</span>
+      <span style="color:#374151;">${ultimaAnotacao.texto||''}</span>
+      <span style="color:#9ca3af;font-size:.75rem;margin-left:8px;">— ${formatarDataHora(ultimaAnotacao.data_hora)}</span>
+    </div>` : ''}
+
+    ${proc.situacao_atual ? `<div class="situacao" style="font-size:.92rem;margin-bottom:10px;">${proc.situacao_atual}</div>` : ''}
+
+    <div style="font-size:.82rem;color:var(--muted);display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px;">
       <span><b>Tipo:</b> ${proc.tipo||'—'}</span>
       <span><b>Unidade:</b> ${proc.unidade||'—'}</span>
       <span><b>OSS:</b> ${proc.oss||'—'}</span>
-      <span><b>Cadastro:</b> ${formatarData(proc.data_cadastro)}</span>
-      <span><b>Atualização:</b> ${formatarData(proc.data_atualizacao)}</span>
+      <span><b>Cadastro:</b> ${formatarDataSeguro(proc.data_cadastro)}</span>
+      <span><b>Atualização:</b> ${formatarDataSeguro(proc.data_atualizacao)}</span>
     </div>
     ${proc.descricao ? `<p style="margin-top:10px;font-size:.85rem;color:#374151;">${proc.descricao}</p>` : ''}
   </div>
 
   <div class="tabs">
-    <div class="tab active" onclick="switchTab(this,'tab-andamentos')">Andamentos (${andamentos.length})</div>
-    <div class="tab" onclick="switchTab(this,'tab-documentos')">Documentos (${documentos.length})</div>
+    <div class="tab active" onclick="switchTab(this,'tab-ia')">Análise IA</div>
     <div class="tab" onclick="switchTab(this,'tab-anotacoes')">Anotações (${anotacoes.length})</div>
-    <div class="tab" onclick="switchTab(this,'tab-ia')">Análise IA</div>
-    <div class="tab" onclick="switchTab(this,'tab-verificacoes')">Sem Movimentação (${verificacoes.length})</div>
+    <div class="tab" onclick="switchTab(this,'tab-andamentos')">Andamentos (${andamentos.length})</div>
+    <div class="tab" onclick="switchTab(this,'tab-documentos')">Documentos (${documentos.length})</div>
   </div>
 
-  <div id="tab-andamentos">
-    <div class="flex gap-2" style="margin-bottom:12px;">
+  <!-- ABA: ANÁLISE IA (padrão) -->
+  <div id="tab-ia">
+    <div id="ia-content">
+      ${temIA ? renderIABox(proc) : '<div style="padding:20px;text-align:center;color:var(--muted);"><i class="fa fa-brain" style="font-size:2rem;margin-bottom:10px;display:block;"></i>Nenhuma análise disponível ainda.<br><small>Adicione documentos ou andamentos para acionar a IA.</small></div>'}
+    </div>
+    <div style="margin-top:12px;">
+      <button class="btn btn-secondary btn-sm" onclick="acionarIAManual('${sei}')"><i class="fa fa-sync-alt"></i> Atualizar Análise IA</button>
+    </div>
+    <div id="ia-status-msg" class="mt-2"></div>
+  </div>
+
+  <!-- ABA: ANOTAÇÕES -->
+  <div id="tab-anotacoes" class="hidden">
+    <div style="margin-bottom:16px;">
+      <textarea id="nova-anotacao" rows="3" placeholder="Registre uma atualização de gestão, observação ou decisão..." style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;font-size:.85rem;box-sizing:border-box;"></textarea>
+      <button class="btn btn-primary btn-sm mt-2" onclick="salvarAnotacao('${sei}')"><i class="fa fa-save"></i> Adicionar Anotação</button>
+    </div>
+    ${anotacoes.length ? anotacoes.map(a => `
+      <div class="anotacao-item">
+        <div class="anot-header">${formatarDataHora(a.data_hora)}${a.usuario ? ' — <b>'+a.usuario+'</b>' : ''}</div>
+        <div class="anot-body">${a.texto||''}</div>
+      </div>`).join('') : '<p class="text-muted">Nenhuma anotação registrada.</p>'}
+  </div>
+
+  <!-- ABA: ANDAMENTOS -->
+  <div id="tab-andamentos" class="hidden">
+    <div class="flex gap-2" style="margin-bottom:14px;">
       <button class="btn btn-primary btn-sm" onclick="mostrarIndexarAndamento('${sei}')"><i class="fa fa-paste"></i> Indexar Andamentos</button>
     </div>
+    ${proc.aprendizado_ia ? `
+    <div style="background:#f5f3ff;border:1px solid #c4b5fd;border-radius:8px;padding:14px;margin-bottom:16px;">
+      <div style="font-weight:600;color:#6d28d9;font-size:.85rem;margin-bottom:6px;"><i class="fa fa-brain"></i> Resumo IA da Timeline</div>
+      <div style="font-size:.84rem;color:#374151;white-space:pre-wrap;">${proc.aprendizado_ia}</div>
+    </div>` : ''}
     ${andamentos.length ? andamentos.map(a => `
       <div class="andamento-item">
-        <div class="and-header">${a.data_movimento||''} ${a.hora_movimento||''} — ${a.usuario_indexacao||''}</div>
+        <div class="and-header">${formatarDataGAS(a.data_movimento)}${a.hora_movimento ? ' às ' + formatarHoraGAS(a.hora_movimento) : ''}</div>
         <div class="and-body">${a.descricao||''}</div>
       </div>`).join('') : '<p class="text-muted">Nenhum andamento registrado.</p>'}
   </div>
 
+  <!-- ABA: DOCUMENTOS -->
   <div id="tab-documentos" class="hidden">
     <div class="flex gap-2" style="margin-bottom:12px;">
       <button class="btn btn-primary btn-sm" onclick="mostrarUpload('${sei}')"><i class="fa fa-upload"></i> Importar Documentos</button>
@@ -338,70 +407,42 @@ async function abrirProcesso(sei) {
         <i class="${iconDoc(d.nome_arquivo)}"></i>
         <div style="flex:1;">
           <div class="doc-name">${d.nome_arquivo}</div>
-          <div class="doc-meta">${formatarData(d.data_upload)} — ${d.usuario_upload||''} — ${d.tamanho ? formatarTamanho(d.tamanho) : 'texto extraído'}</div>
+          <div class="doc-meta">${formatarDataSeguro(d.data_upload)} — ${d.usuario_upload||''} — ${d.tamanho ? formatarTamanho(d.tamanho) : 'texto extraído'}</div>
         </div>
         ${d.link_verificacao
-          ? `<a href="${d.link_verificacao}" target="_blank" class="btn btn-secondary btn-sm" title="Verificar no SEI (sem login)"><i class="fa fa-check-circle"></i> SEI</a>`
-          : d.link_sei
-            ? `<a href="${d.link_sei}" target="_blank" class="btn btn-secondary btn-sm" title="Abrir no SEI"><i class="fa fa-external-link-alt"></i></a>`
-            : ''}
+          ? `<a href="${d.link_verificacao}" target="_blank" class="btn btn-secondary btn-sm" title="Verificar no SEI"><i class="fa fa-check-circle"></i> SEI</a>`
+          : d.link_sei ? `<a href="${d.link_sei}" target="_blank" class="btn btn-secondary btn-sm"><i class="fa fa-external-link-alt"></i></a>` : ''}
       </div>`).join('') : '<p class="text-muted">Nenhum documento importado.</p>'}
-  </div>
-
-  <div id="tab-anotacoes" class="hidden">
-    <div style="margin-bottom:12px;">
-      <textarea id="nova-anotacao" rows="3" placeholder="Digite sua anotação..." style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;font-size:.85rem;"></textarea>
-      <button class="btn btn-primary btn-sm mt-2" onclick="salvarAnotacao('${sei}')"><i class="fa fa-save"></i> Adicionar Anotação</button>
-    </div>
-    ${anotacoes.length ? anotacoes.map(a => `
-      <div class="anotacao-item">
-        <div class="anot-header">${formatarDataHora(a.data_hora)} — <b>${a.usuario||''}</b></div>
-        <div class="anot-body">${a.texto||''}</div>
-      </div>`).join('') : '<p class="text-muted">Nenhuma anotação registrada.</p>'}
-  </div>
-
-  <div id="tab-ia" class="hidden">
-    <div id="ia-content">
-      ${proc.resumo_ia || proc.situacao_atual ? renderIABox(proc) : '<p class="text-muted">Nenhuma análise de IA disponível. Adicione documentos ou andamentos para acionar a IA.</p>'}
-    </div>
-    <div id="ia-status-msg" class="mt-2"></div>
-  </div>
-
-  <div id="tab-verificacoes" class="hidden">
-    <div class="alert alert-info" style="margin-bottom:12px;">
-      <i class="fa fa-info-circle"></i> Registre aqui quando não houve movimentação. O contador de tempo é reiniciado sem acionar nova análise de IA.
-    </div>
-    <button class="btn btn-warning" onclick="registrarSemMovimentacao('${sei}')">
-      <i class="fa fa-check-circle"></i> Registrar: Sem Movimentação
-    </button>
-    <div id="lista-verificacoes" style="margin-top:16px;">
-      ${verificacoes.length ? verificacoes.map(v => `
-        <div style="padding:8px;border-bottom:1px solid var(--border);font-size:.83rem;">
-          <i class="fa fa-check text-muted"></i> ${formatarDataHora(v.data_hora)} — ${v.usuario||''} — ${v.observacao||'Sem movimentação verificada'}
-        </div>`).join('') : '<p class="text-muted">Nenhum registro de verificação.</p>'}
-    </div>
   </div>`;
 
   window._processoAtual = proc;
 }
 
-// FIX: usa campos corretos do schema (resumo_ia, apontamentos_ia, etc.)
+// ==================== ANÁLISE IA BOX ====================
 function renderIABox(proc) {
   return `<div class="ia-box">
-    <h4><i class="fa fa-brain"></i> Análise de IA — ${proc.categoria||''}</h4>
+    <h4><i class="fa fa-brain"></i> Análise de IA — ${proc.categoria||'Processo'}</h4>
     ${proc.situacao_atual ? `<div class="ia-section"><h5>Situação Atual</h5><p>${proc.situacao_atual}</p></div>` : ''}
-    ${proc.resumo_ia ? `<div class="ia-section"><h5>Resumo</h5><p>${proc.resumo_ia}</p></div>` : ''}
-    ${proc.apontamentos_ia ? `<div class="ia-section"><h5>Apontamentos</h5><p>${proc.apontamentos_ia}</p></div>` : ''}
-    ${proc.sugestoes_ia ? `<div class="ia-section"><h5>Sugestões</h5><p>${proc.sugestoes_ia}</p></div>` : ''}
+    ${proc.resumo_ia ? `<div class="ia-section"><h5>Resumo Gerencial</h5><p>${proc.resumo_ia}</p></div>` : ''}
+    ${proc.apontamentos_ia ? `<div class="ia-section"><h5>Pontos Críticos e Riscos</h5><p>${proc.apontamentos_ia}</p></div>` : ''}
+    ${proc.sugestoes_ia ? `<div class="ia-section"><h5>Sugestões de Ação</h5><p>${proc.sugestoes_ia}</p></div>` : ''}
     ${proc.proximos_passos_ia ? `<div class="ia-section"><h5>Próximos Passos</h5><p>${proc.proximos_passos_ia}</p></div>` : ''}
-    <div style="font-size:.72rem;color:var(--muted);margin-top:10px;">Última análise: ${formatarDataHora(proc.data_atualizacao)}</div>
+    ${proc.processos_similares_ref ? `<div class="ia-section"><h5><i class="fa fa-link"></i> Processos Semelhantes</h5><p>${proc.processos_similares_ref}</p></div>` : ''}
+    <div style="font-size:.72rem;color:var(--muted);margin-top:12px;">Última análise: ${formatarDataHora(proc.data_atualizacao)}</div>
   </div>`;
+}
+
+async function acionarIAManual(sei) {
+  const statusEl = document.getElementById('ia-status-msg');
+  if (statusEl) statusEl.innerHTML = '<span class="spinner"></span> Gerando análise completa...';
+  await acionarIA(sei);
+  abrirProcesso(sei);
 }
 
 function switchTab(el, id) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
-  ['tab-andamentos','tab-documentos','tab-anotacoes','tab-ia','tab-verificacoes'].forEach(t => {
+  ['tab-ia','tab-anotacoes','tab-andamentos','tab-documentos'].forEach(t => {
     const el2 = document.getElementById(t);
     if (el2) el2.classList.toggle('hidden', t !== id);
   });
@@ -413,7 +454,7 @@ async function registrarSemMovimentacao(sei) {
   const res = await api('verificacoes/registrar', { sei, observacao: obs });
   if (res.ok) {
     api('log/registrar', { acao: 'SEM_MOVIMENTACAO', numero_sei: sei, detalhes: obs });
-    alert('Verificação registrada! Contador reiniciado.');
+    alert('Verificação registrada.');
     abrirProcesso(sei);
   } else alert('Erro: ' + (res.erro || 'Não foi possível registrar.'));
 }
@@ -422,13 +463,70 @@ async function registrarSemMovimentacao(sei) {
 async function salvarAnotacao(sei) {
   const texto = document.getElementById('nova-anotacao').value.trim();
   if (!texto) { alert('Digite uma anotação.'); return; }
-  const res = await api('anotacoes/salvar', { sei, texto });  // FIX: campo "texto"
+  const res = await api('anotacoes/salvar', { sei, texto });
   if (!res.ok) { alert('Erro: ' + res.erro); return; }
   api('log/registrar', { acao: 'ANOTACAO', numero_sei: sei, detalhes: texto.substring(0,100) });
   document.getElementById('nova-anotacao').value = '';
   const statusEl = document.getElementById('ia-status-msg');
-  if (statusEl) statusEl.innerHTML = '<span class="spinner"></span> Analisando com IA...';
+  if (statusEl) statusEl.innerHTML = '<span class="spinner"></span> Atualizando análise com nova anotação...';
   await acionarIA(sei);
+  abrirProcesso(sei);
+}
+
+// ==================== EDITAR PROCESSO ====================
+function editarProcesso(sei) {
+  const proc = window._processoAtual;
+  if (!proc) return;
+  criarModal(`
+    <h2 style="margin-bottom:16px;"><i class="fa fa-edit"></i> Editar Processo</h2>
+    <div class="form-group"><label>Título / Objeto</label><input id="edit-titulo" value="${(proc.titulo||'').replace(/"/g,'&quot;')}"></div>
+    <div class="form-group"><label>Tipo</label>
+      <select id="edit-tipo">${optsTipos(proc.tipo)}</select></div>
+    <div class="form-group"><label>Status</label>
+      <select id="edit-status">${['Em andamento','Aguardando','Concluído','Suspenso'].map(s=>`<option ${proc.status===s?'selected':''}>${s}</option>`).join('')}</select></div>
+    <div class="form-group"><label>Prioridade</label>
+      <select id="edit-prioridade">${['Baixa','Média','Alta','Máxima'].map(p=>`<option ${proc.prioridade===p?'selected':''}>${p}</option>`).join('')}</select></div>
+    <div class="form-group"><label>Unidade</label>
+      <select id="edit-unidade" onchange="editarUnidadeSelecionada()">
+        <option value="">— Selecione —</option>
+        ${optsUnidades(proc.unidade)}
+      </select></div>
+    <div class="form-group"><label>OSS <small style="color:var(--muted);">(preenchida automaticamente)</small></label>
+      <input id="edit-oss" value="${(proc.oss||'').replace(/"/g,'&quot;')}"></div>
+    <div class="form-group"><label>Descrição</label>
+      <textarea id="edit-descricao" rows="3">${proc.descricao||''}</textarea></div>
+    <div id="edit-err" class="hidden alert alert-danger" style="margin-bottom:8px;"></div>
+    <div class="flex gap-2">
+      <button class="btn btn-primary" onclick="salvarEdicaoProcesso('${sei}')"><i class="fa fa-save"></i> Salvar</button>
+      <button class="btn btn-secondary" onclick="fecharModal()">Cancelar</button>
+    </div>`);
+}
+
+function editarUnidadeSelecionada() {
+  const sel = document.getElementById('edit-unidade'); if (!sel) return;
+  const opt = sel.options[sel.selectedIndex];
+  const oss = opt?.getAttribute('data-oss') || '';
+  const ossEl = document.getElementById('edit-oss');
+  if (ossEl && oss) ossEl.value = oss;
+}
+
+async function salvarEdicaoProcesso(sei) {
+  const titulo    = document.getElementById('edit-titulo').value.trim();
+  const tipo      = document.getElementById('edit-tipo').value;
+  const status    = document.getElementById('edit-status').value;
+  const prioridade = document.getElementById('edit-prioridade').value;
+  const unidade   = document.getElementById('edit-unidade').value;
+  const oss       = document.getElementById('edit-oss').value.trim();
+  const descricao = document.getElementById('edit-descricao').value.trim();
+  const errEl     = document.getElementById('edit-err');
+  if (!titulo) { errEl.textContent = 'Título obrigatório.'; errEl.classList.remove('hidden'); return; }
+  const res = await api('processos/atualizar', { numero_sei: sei, titulo, tipo, status, prioridade, unidade, oss, descricao });
+  if (!res.ok) { errEl.textContent = res.erro || 'Erro ao salvar.'; errEl.classList.remove('hidden'); return; }
+  api('log/registrar', { acao: 'EDITAR_PROCESSO', numero_sei: sei, detalhes: `Prioridade: ${prioridade}` });
+  fecharModal();
+  // Atualiza todosProcessos em memória
+  const idx2 = todosProcessos.findIndex(p => p.numero_sei === sei);
+  if (idx2 > -1) Object.assign(todosProcessos[idx2], { titulo, tipo, status, prioridade, unidade, oss, descricao });
   abrirProcesso(sei);
 }
 
@@ -436,7 +534,7 @@ async function salvarAnotacao(sei) {
 function mostrarIndexarAndamento(sei) {
   criarModal(`
     <h2><i class="fa fa-paste"></i> Indexar Andamentos</h2>
-    <p style="font-size:.85rem;color:var(--muted);margin-bottom:12px;">Cole o histórico de andamentos copiado do SEI.</p>
+    <p style="font-size:.85rem;color:var(--muted);margin-bottom:12px;">Cole o histórico de andamentos copiado do SEI. O sistema extrai datas, horários e descrições automaticamente.</p>
     <div class="form-group">
       <label>Texto dos Andamentos</label>
       <textarea id="texto-andamentos" rows="12" placeholder="Cole o histórico de andamentos do SEI..."></textarea>
@@ -453,17 +551,68 @@ async function processarAndamentos(sei) {
   if (!texto) { alert('Cole o texto dos andamentos.'); return; }
   const resultEl = document.getElementById('and-result');
   resultEl.innerHTML = '<span class="spinner"></span> Processando...';
-  // FIX: campo "texto" (era "texto_bruto")
   const res = await api('andamentos/indexar', { sei, texto });
   if (!res.ok) { resultEl.innerHTML = `<div class="alert alert-danger">${res.erro}</div>`; return; }
   api('log/registrar', { acao: 'INDEXAR_ANDAMENTOS', numero_sei: sei, detalhes: `${res.novos||0} novos` });
   resultEl.innerHTML = `<div class="alert alert-success"><i class="fa fa-check"></i> ${res.novos||0} novos andamentos, ${res.ignorados||0} duplicatas ignoradas.</div>`;
   if ((res.novos || 0) > 0) {
-    resultEl.innerHTML += '<div class="mt-2"><span class="spinner"></span> Acionando IA...</div>';
+    resultEl.innerHTML += '<div class="mt-2"><span class="spinner"></span> Gerando resumo da timeline de andamentos...';
+    await gerarResumoAndamentos(sei);
+    resultEl.innerHTML += '<br><span class="spinner"></span> Acionando análise completa de IA...';
     await acionarIA(sei);
-    resultEl.innerHTML += '<div class="alert alert-success mt-2">Análise de IA concluída!</div>';
+    resultEl.innerHTML += '<br><i class="fa fa-check"></i> Análise concluída!</div>';
   }
   setTimeout(() => { fecharModal(); abrirProcesso(sei); }, 1500);
+}
+
+// Gera resumo específico de andamentos e salva em aprendizado_ia
+async function gerarResumoAndamentos(sei) {
+  const ollamaOk = await testarOllama(); if (!ollamaOk) return;
+  const resA = await api('andamentos/listar?sei=' + sei);
+  const andamentos = resA.andamentos || [];
+  if (!andamentos.length) return;
+
+  // Ordenar cronologicamente para análise
+  const sorted = [...andamentos].sort((a,b) => new Date(a.data_movimento) - new Date(b.data_movimento));
+  const primeiraData = formatarDataGAS(sorted[0]?.data_movimento);
+  const ultimaData   = formatarDataGAS(sorted[sorted.length-1]?.data_movimento);
+  const andamentosTxt = sorted.map(a =>
+    `${formatarDataGAS(a.data_movimento)} ${formatarHoraGAS(a.hora_movimento)}: ${a.descricao||''}`
+  ).join('\n');
+
+  const prompt = `Você é especialista em gestão de processos administrativos de OSS (Organização Social de Saúde).
+Analise o histórico de andamentos abaixo e gere um resumo executivo.
+
+Inclua obrigatoriamente:
+- Data de início do processo (primeira movimentação)
+- Data da última movimentação
+- Principais eventos (despachos, aprovações, documentos juntados/criados, prazos, encaminhamentos)
+- Foco especial: inclusão, criação ou juntada de documentos importantes
+
+Seja objetivo, máx 200 palavras. Responda em JSON:
+{"inicio":"data início","ultima_movimentacao":"data/evento mais recente","resumo":"resumo executivo focado em documentos e decisões importantes"}
+
+HISTÓRICO:
+${andamentosTxt.substring(0, 8000)}`;
+
+  try {
+    const resp = await fetch(OLLAMA_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ model:OLLAMA_MODEL, prompt, stream:false }) });
+    const data = await resp.json();
+    const raw  = (data.response || '').trim();
+    let parsed;
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) { try { parsed = JSON.parse(match[0]); } catch { parsed = null; } }
+    const resumoFinal = parsed
+      ? `📅 Início: ${parsed.inicio||primeiraData} | Última movimentação: ${parsed.ultima_movimentacao||ultimaData}\n\n${parsed.resumo||''}`
+      : `📅 Início: ${primeiraData} | Última movimentação: ${ultimaData}`;
+    await api('processos/atualizar', {
+      numero_sei: sei,
+      ultimo_andamento_resumo: parsed?.resumo?.substring(0,150) || resumoFinal.substring(0,150),
+      ultimo_andamento_data:   sorted[sorted.length-1]?.data_movimento || ''
+    });
+    // Salva análise completa em aprendizado_ia
+    await api('processos/salvar-ia', { numero_sei: sei, aprendizado_ia: resumoFinal });
+  } catch(e) { console.warn('Erro ao gerar resumo de andamentos:', e); }
 }
 
 // ==================== LINKS SEI ====================
@@ -525,7 +674,6 @@ function mostrarUpload(sei) {
     <div style="margin-top:12px;text-align:right;">
       <button class="btn btn-secondary" onclick="fecharModal()">Fechar</button>
     </div>`);
-
   const dz = document.getElementById('dropzone-area');
   dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
   dz.addEventListener('dragleave', () => dz.classList.remove('over'));
@@ -581,7 +729,6 @@ async function processarArquivos(files, sei) {
 
       if (texto && texto.trim().length > 0) {
         updateProgItem(prog, file.name, 'proc', 'Salvando texto...');
-        // FIX: doc_id → documento_id, doc_nome → documento_nome
         await salvarBlocosSheets(sei, resReg.doc_id, file.name, texto);
       }
 
@@ -644,7 +791,6 @@ function dividirEmBlocos(texto, maxChars) {
   return blocos;
 }
 
-// FIX: usa documento_id / documento_nome (eram doc_id / doc_nome)
 async function salvarBlocosSheets(sei, docId, docNome, texto) {
   const blocos = dividirEmBlocos(texto, BLOCO_MAX);
   for (let i = 0; i < blocos.length; i++) {
@@ -655,50 +801,80 @@ async function salvarBlocosSheets(sei, docId, docNome, texto) {
   }
 }
 
-// ==================== IA ANÁLISE ====================
+// ==================== IA ANÁLISE COMPLETA ====================
 async function acionarIA(sei) {
   const ollamaOk = await testarOllama(); if (!ollamaOk) return;
-  const resConteudo = await api('conteudo/listar?sei=' + sei);
-  const blocos      = (resConteudo.blocos || []).map(b => b.conteudo || '');
-  const resBases    = await api('bases-legais/listar');
-  const basesLegais = (resBases.blocos || []).map(b => b.conteudo || '');
-  const [resP, resA, resAnot] = await Promise.all([
+
+  // Carrega todos os dados em paralelo
+  const [resConteudo, resBases, resP, resA, resAnot, resSim] = await Promise.all([
+    api('conteudo/listar?sei=' + sei),
+    api('bases-legais/listar'),
     api('processos/obter?sei=' + sei),
     api('andamentos/listar?sei=' + sei),
-    api('anotacoes/listar?sei=' + sei)
+    api('anotacoes/listar?sei=' + sei),
+    api('processos/similares?sei=' + sei)
   ]);
-  const proc = resP.processo || {};
-  // FIX: campos corretos — data_movimento + hora_movimento (era data_hora); texto (era conteudo)
-  const andamentos = (resA.andamentos || []).slice(-5).map(a => `${a.data_movimento||''} ${a.hora_movimento||''}: ${a.descricao||''}`).join('\n');
-  const anotacoes  = (resAnot.anotacoes || []).slice(-3).map(a => `${a.data_hora||''}: ${a.texto||''}`).join('\n');
 
-  const keywords = [proc.titulo||'', proc.tipo||'', sei, 'contrato','prazo','pagamento','execução','saúde']
+  const proc       = resP.processo || {};
+  const blocos     = (resConteudo.blocos || []).map(b => b.conteudo || '');
+  const basesLegais = (resBases.blocos || []).map(b => b.conteudo || '');
+  const andamentos = (resA.andamentos || []).slice(-10).map(a =>
+    `${formatarDataGAS(a.data_movimento)} ${formatarHoraGAS(a.hora_movimento)}: ${a.descricao||''}`
+  ).join('\n');
+  const anotacoes = (resAnot.anotacoes || []).slice(-5).map(a =>
+    `${formatarDataHora(a.data_hora)}: ${a.texto||''}`
+  ).join('\n');
+
+  // Processos similares (por categoria OU por tipo)
+  let similares = resSim.processos || [];
+  if (!similares.length && proc.tipo) {
+    similares = todosProcessos.filter(p => p.numero_sei !== sei && p.tipo === proc.tipo).slice(0, 3);
+  }
+  const similaresTxt = similares.length
+    ? similares.map(s => `SEI ${s.numero_sei}: ${s.titulo} — Status: ${s.status} — ${s.situacao_atual || s.resumo_ia || 'sem análise'}`).join('\n')
+    : '';
+
+  // Filtrar conteúdo mais relevante
+  const keywords = [proc.titulo||'', proc.tipo||'', sei, 'contrato','prazo','pagamento','execução','saúde','OSS']
     .join(' ').toLowerCase().split(/\s+/).filter(k => k.length > 3);
-  const conteudoFiltrado    = filtrarBlocos(blocos, keywords, RELEVANCIA_MAX_CHARS);
-  const basesLegaisFiltradas = filtrarBlocos(basesLegais, keywords, 10000);
+  const conteudoFiltrado     = filtrarBlocos(blocos, keywords, RELEVANCIA_MAX_CHARS);
+  const basesLegaisFiltradas = filtrarBlocos(basesLegais, keywords, 12000);
 
-  const prompt = `Você é um especialista em gestão de contratos e processos administrativos de Organização Social de Saúde (OSS).
-Analise o processo abaixo e gere uma análise estruturada.
+  const prompt = `Você é um ESPECIALISTA em gestão de contratos, processos administrativos e regulação de Organizações Sociais de Saúde (OSS) no setor público brasileiro.
+Possui profundo conhecimento em: Lei 9.637/98 (OS), contratos de gestão, licitações na saúde, fiscalização contratual, metas assistenciais e normativas do SUS.
 
-PROCESSO: SEI ${sei}
+ANALISE o processo abaixo com visão gerencial estratégica:
+
+=== PROCESSO SEI ${sei} ===
 TÍTULO: ${proc.titulo||''}
-TIPO: ${proc.tipo||''}
+TIPO: ${proc.tipo||'Não informado'}
 STATUS: ${proc.status||''}
 PRIORIDADE: ${proc.prioridade||''}
-OSS: ${proc.oss||''}
-UNIDADE: ${proc.unidade||''}
+UNIDADE: ${proc.unidade||'Não informada'}
+OSS: ${proc.oss||'Não informada'}
 
 ÚLTIMOS ANDAMENTOS:
-${andamentos || 'Sem andamentos.'}
+${andamentos || 'Nenhum andamento registrado.'}
 
-ANOTAÇÕES RECENTES:
-${anotacoes || 'Sem anotações.'}
+ANOTAÇÕES DE GESTÃO:
+${anotacoes || 'Nenhuma anotação.'}
 
-${conteudoFiltrado ? 'CONTEÚDO DOS DOCUMENTOS:\n' + conteudoFiltrado : ''}
-${basesLegaisFiltradas ? '\nBASES LEGAIS APLICÁVEIS:\n' + basesLegaisFiltradas : ''}
+${conteudoFiltrado ? '=== CONTEÚDO DOS DOCUMENTOS ===\n' + conteudoFiltrado : ''}
 
-Responda EXATAMENTE neste formato JSON (sem markdown):
-{"categoria":"categoria do processo em 3-5 palavras","situacao_atual":"situação atual em 1-2 frases","resumo":"resumo detalhado","apontamentos":"pontos críticos e riscos","sugestoes":"sugestões de ação","proximos_passos":"próximos passos concretos"}`;
+${basesLegaisFiltradas ? '=== BASES LEGAIS APLICÁVEIS ===\n' + basesLegaisFiltradas : ''}
+
+${similaresTxt ? '=== PROCESSOS SEMELHANTES NO SISTEMA ===\n' + similaresTxt : ''}
+
+Responda EXATAMENTE neste formato JSON (sem markdown, sem texto fora do JSON):
+{
+  "categoria": "categoria do processo em 3-5 palavras",
+  "situacao_atual": "situação atual e status do processo em 1-2 frases objetivas",
+  "resumo": "análise gerencial detalhada incluindo contexto, histórico e situação atual (mín. 3 parágrafos)",
+  "apontamentos": "pontos críticos, riscos contratuais, prazos importantes e alertas legais",
+  "sugestoes": "sugestões práticas de ação baseadas nas bases legais aplicáveis e boas práticas de gestão de OSS",
+  "proximos_passos": "próximos passos concretos e priorizados com responsáveis e prazos sugeridos",
+  "processos_similares": "${similaresTxt ? 'comparação com os processos semelhantes: como foram conduzidos, lições aprendidas e benchmarks aplicáveis' : 'sem processos semelhantes identificados no sistema'}"
+}`;
 
   try {
     const resp = await fetch(OLLAMA_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ model:OLLAMA_MODEL, prompt, stream:false }) });
@@ -707,19 +883,19 @@ Responda EXATAMENTE neste formato JSON (sem markdown):
     let ia;
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     if (jsonMatch) { try { ia = JSON.parse(jsonMatch[0]); } catch { ia = null; } }
-    if (!ia) ia = { categoria:'Análise', situacao_atual:'', resumo:raw, apontamentos:'', sugestoes:'', proximos_passos:'' };
+    if (!ia) ia = { categoria:'Análise', situacao_atual:'', resumo:raw, apontamentos:'', sugestoes:'', proximos_passos:'', processos_similares:'' };
 
-    // FIX: campos corretos do schema — resumo_ia, apontamentos_ia, etc.
     await api('processos/salvar-ia', {
-      numero_sei: sei,
-      categoria:        ia.categoria || '',
-      situacao_atual:   ia.situacao_atual || '',
-      resumo_ia:        ia.resumo || '',
-      apontamentos_ia:  ia.apontamentos || '',
-      sugestoes_ia:     ia.sugestoes || '',
-      proximos_passos_ia: ia.proximos_passos || ''
+      numero_sei:          sei,
+      categoria:           ia.categoria           || '',
+      situacao_atual:      ia.situacao_atual       || '',
+      resumo_ia:           ia.resumo               || '',
+      apontamentos_ia:     ia.apontamentos         || '',
+      sugestoes_ia:        ia.sugestoes            || '',
+      proximos_passos_ia:  ia.proximos_passos      || '',
+      processos_similares_ref: ia.processos_similares || ''
     });
-    api('log/registrar', { acao:'ANALISE_IA', numero_sei:sei, detalhes:'Análise concluída' });
+    api('log/registrar', { acao:'ANALISE_IA', numero_sei:sei, detalhes:'Análise completa concluída' });
   } catch(e) { console.warn('Erro na análise IA:', e); }
 }
 
@@ -754,11 +930,12 @@ function optsTipos(sel) {
   return opcoes.map(t => `<option ${sel===t?'selected':''}>${t}</option>`).join('');
 }
 function optsUnidades(sel) {
-  return _unidades.map(u => `<option value="${u.valor}" data-oss="${u.associado}" ${sel===u.valor?'selected':''}>${u.valor}</option>`).join('');
+  return _unidades.map(u => `<option value="${u.valor}" data-oss="${u.associado||''}" ${sel===u.valor?'selected':''}>${u.valor}</option>`).join('');
 }
 
 function tipoSelecionado() {
-  const v = document.getElementById('w-tipo-novo')?.value;
+  // FIX: id correto é w-tipo (não w-tipo-novo)
+  const v = document.getElementById('w-tipo')?.value;
   if (v === '__novo__') mostrarNovoTipo();
 }
 function mostrarNovoTipo() {
@@ -785,13 +962,33 @@ function unidadeSelecionada() {
   const oss = opt?.getAttribute('data-oss') || '';
   const ossEl = document.getElementById('w-oss');
   if (ossEl) ossEl.value = oss;
+  // Mostrar processos relacionados à unidade
+  mostrarProcessosDaUnidade(sel.value, 'processos-unidade-info');
 }
+
 function mostrarNovaUnidade() {
   const unidade = prompt('Nome da Unidade:'); if (!unidade) return;
   const oss = prompt('OSS associada:') || '';
   api('dados-fixos/criar', { categoria:'unidade', valor:unidade, associado:oss }).then(r => {
     if (r.ok) { _unidades.push({ valor:unidade, associado:oss }); renderWizardStep(); } else alert('Erro: '+r.erro);
   });
+}
+
+function mostrarProcessosDaUnidade(unidade, containerId) {
+  const el = document.getElementById(containerId);
+  if (!el || !unidade || !todosProcessos.length) { if(el) el.innerHTML=''; return; }
+  const relacionados = todosProcessos.filter(p => p.unidade === unidade && p.status === 'Em andamento');
+  if (!relacionados.length) { el.innerHTML = ''; return; }
+  el.innerHTML = `
+    <div style="margin-top:10px;padding:10px;background:#f0f9ff;border-radius:6px;border:1px solid #bae6fd;">
+      <p style="font-size:.78rem;color:#0369a1;margin-bottom:6px;font-weight:600;"><i class="fa fa-info-circle"></i> ${relacionados.length} processo(s) em andamento nesta unidade:</p>
+      ${relacionados.map(p => `
+        <div style="padding:4px 0;border-bottom:1px solid #e0f2fe;font-size:.78rem;">
+          <span style="color:#0369a1;font-weight:600;cursor:pointer;" onclick="fecharModal();abrirProcesso('${p.numero_sei}')">${p.numero_sei}</span>
+          — ${p.titulo}
+          ${p.situacao_atual ? `<br><span style="color:#64748b;">${p.situacao_atual.substring(0,100)}${p.situacao_atual.length>100?'...':''}</span>` : ''}
+        </div>`).join('')}
+    </div>`;
 }
 
 // ==================== NOVO PROCESSO (WIZARD) ====================
@@ -823,12 +1020,10 @@ function renderWizardStep() {
       <div class="form-group"><label>Título / Objeto *</label><input id="w-titulo" value="${novoProc.titulo||''}" placeholder="Descrição resumida do processo"></div>
       <div class="form-group">
         <label>Tipo</label>
-        <div style="display:flex;gap:6px;align-items:center;">
-          <select id="w-tipo" style="flex:1;" onchange="tipoSelecionado()">
-            ${optsTipos(novoProc.tipo)}
-            <option value="__novo__">+ Cadastrar novo tipo...</option>
-          </select>
-        </div>
+        <select id="w-tipo" onchange="tipoSelecionado()">
+          ${optsTipos(novoProc.tipo)}
+          <option value="__novo__">+ Cadastrar novo tipo...</option>
+        </select>
         ${_tipos.length ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">${_tipos.map(t=>`<span style="background:#f3f4f6;border-radius:4px;padding:2px 8px;font-size:.75rem;">${t}<button onclick="excluirTipo('${t}')" style="background:none;border:none;cursor:pointer;color:#ef4444;margin-left:2px;">✕</button></span>`).join('')}</div>` : ''}
       </div>
       <div class="flex gap-2 mt-4"><button class="btn btn-primary" onclick="wizardNext()">Próximo <i class="fa fa-arrow-right"></i></button></div>`;
@@ -844,13 +1039,17 @@ function renderWizardStep() {
         <select id="w-unidade" onchange="unidadeSelecionada()">
           <option value="">— Selecione —</option>${optsUnidades(novoProc.unidade)}
           <option value="__nova__">+ Cadastrar nova unidade/OSS...</option>
-        </select></div>
-      <div class="form-group"><label>OSS <small style="color:var(--muted);">(preenchido automaticamente)</small></label>
+        </select>
+        <div id="processos-unidade-info"></div>
+      </div>
+      <div class="form-group"><label>OSS <small style="color:var(--muted);">(preenchida automaticamente)</small></label>
         <input id="w-oss" value="${novoProc.oss||''}" style="background:#f9fafb;"></div>
       <div class="form-group"><label>Descrição</label><textarea id="w-descricao">${novoProc.descricao||''}</textarea></div>
       <div class="flex gap-2 mt-4">
         <button class="btn btn-secondary" onclick="wizardPrev()"><i class="fa fa-arrow-left"></i> Voltar</button>
         <button class="btn btn-primary" onclick="wizardNext()">Próximo <i class="fa fa-arrow-right"></i></button></div>`;
+    // Se já havia unidade selecionada, mostrar processos relacionados
+    if (novoProc.unidade) mostrarProcessosDaUnidade(novoProc.unidade, 'processos-unidade-info');
   } else if (wizardStep === 3) {
     body.innerHTML = `
       <h3 style="margin-bottom:16px;">Documentos (opcional)</h3>
@@ -869,6 +1068,7 @@ function renderWizardStep() {
   } else if (wizardStep === 4) {
     body.innerHTML = `
       <h3 style="margin-bottom:16px;">Andamentos Iniciais (opcional)</h3>
+      <p style="font-size:.83rem;color:var(--muted);margin-bottom:10px;">Cole o histórico de andamentos do SEI para análise automática.</p>
       <div class="form-group"><textarea id="w-andamentos" rows="10" placeholder="Cole o histórico de andamentos...">${novoProc.andamentos||''}</textarea></div>
       <div class="flex gap-2 mt-4">
         <button class="btn btn-secondary" onclick="wizardPrev()"><i class="fa fa-arrow-left"></i> Voltar</button>
@@ -898,6 +1098,7 @@ function wizardNext() {
     novoProc.sei   = document.getElementById('w-sei').value.trim();
     novoProc.titulo = document.getElementById('w-titulo').value.trim();
     novoProc.tipo  = document.getElementById('w-tipo').value;
+    if (novoProc.tipo === '__novo__') novoProc.tipo = '';
     if (!novoProc.sei || !novoProc.titulo) { alert('Preencha SEI e Título.'); return; }
   } else if (wizardStep === 2) {
     novoProc.status    = document.getElementById('w-status').value;
@@ -959,8 +1160,9 @@ async function cadastrarProcesso() {
 
   if (novoProc.andamentos) {
     statusEl.innerHTML = '<span class="spinner"></span> Indexando andamentos...';
-    // FIX: campo "texto" (era "texto_bruto")
     await api('andamentos/indexar', { sei: novoProc.sei, texto: novoProc.andamentos });
+    statusEl.innerHTML = '<span class="spinner"></span> Gerando resumo de andamentos...';
+    await gerarResumoAndamentos(novoProc.sei);
   }
 
   if (novoProc._files?.length || novoProc.andamentos) {
@@ -1072,11 +1274,10 @@ async function removerUsuario(usuario) {
   if (res.ok) carregarAdmUsuarios(); else alert('Erro: '+res.erro);
 }
 
-// FIX: configListar retorna res.config (objeto, não array)
 async function carregarAdmConfig() {
   const el  = document.getElementById('adm-config');
   const res = await api('config/listar');
-  const cfg = res.config || {};  // FIX: era res.configs (array inexistente)
+  const cfg = res.config || {};
   el.innerHTML = `
   <h3 style="font-size:.95rem;margin:12px 0;">Configurações do Sistema</h3>
   <div class="form-group"><label>Modelo Ollama</label><input id="cfg-ollama" value="${OLLAMA_MODEL}" placeholder="llama3.2:3b"></div>
@@ -1156,12 +1357,11 @@ async function removerDadoFixo(id, recarregar) {
   else alert('Erro: '+r.erro);
 }
 
-// FIX: res.total_blocos / res.total_docs (era res.status.total_blocos)
 async function carregarAdmBases() {
   const el  = document.getElementById('adm-bases');
   const res = await api('bases-legais/status');
   el.innerHTML = `
-  <div class="alert alert-info" style="margin-bottom:16px;"><i class="fa fa-info-circle"></i> Importe documentos Word/PDF com leis, contratos-modelo e normativas para enriquecer as análises da IA.</div>
+  <div class="alert alert-info" style="margin-bottom:16px;"><i class="fa fa-info-circle"></i> Importe documentos com leis, contratos-modelo, normativas e regulamentos de OSS para enriquecer as análises da IA.</div>
   <div style="background:#f9fafb;border-radius:8px;padding:14px;margin-bottom:16px;font-size:.85rem;">
     <b>Blocos armazenados:</b> ${res.total_blocos||0} — <b>Documentos:</b> ${res.total_docs||0}
   </div>
@@ -1231,20 +1431,89 @@ async function enviarChat() {
   const msgs  = document.getElementById('chat-msgs');
   msgs.innerHTML += `<div class="chat-msg user">${msg}</div>`;
   msgs.scrollTop = msgs.scrollHeight;
-  const ctx = todosProcessos.slice(0,15).map(p => `SEI ${p.numero_sei}: ${p.titulo} (${p.status}, ${p.prioridade}) — ${p.situacao_atual||''}`).join('\n');
-  const prompt = `Você é um assistente de monitoramento de processos de OSS.\n\nPROCESSOS:\n${ctx||'Nenhum.'}\n\nPERGUNTA: ${msg}\n\nResponda em português, objetivamente.`;
+
   const loadMsg = document.createElement('div');
   loadMsg.className = 'chat-msg ai';
   loadMsg.innerHTML = '<span class="spinner"></span>';
   msgs.appendChild(loadMsg);
   msgs.scrollTop = msgs.scrollHeight;
+
   try {
     const ollamaOk = await testarOllama();
-    if (!ollamaOk) { loadMsg.textContent = 'IA não disponível. Verifique o Ollama.'; return; }
+    if (!ollamaOk) { loadMsg.textContent = 'IA não disponível. Verifique se o Ollama está rodando.'; return; }
+
+    // Extrai palavras-chave da pergunta
+    const keywords = msg.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+
+    // Busca processos relevantes no cache local
+    const relevantes = todosProcessos.filter(p =>
+      keywords.some(k =>
+        (p.numero_sei + ' ' + p.titulo + ' ' + (p.situacao_atual||'') + ' ' + (p.unidade||'') + ' ' + (p.oss||'') + ' ' + (p.tipo||'')).toLowerCase().includes(k)
+      )
+    ).slice(0, 2);
+
+    let ctx = '';
+
+    if (relevantes.length > 0) {
+      // Carrega dados completos dos processos mais relevantes
+      for (const p of relevantes) {
+        const [resA, resAnot, resConteudo] = await Promise.all([
+          api('andamentos/listar?sei=' + p.numero_sei),
+          api('anotacoes/listar?sei=' + p.numero_sei),
+          api('conteudo/listar?sei=' + p.numero_sei)
+        ]);
+        ctx += `\n=== PROCESSO SEI ${p.numero_sei} ===\n`;
+        ctx += `TÍTULO: ${p.titulo}\n`;
+        ctx += `TIPO: ${p.tipo||'—'} | STATUS: ${p.status} | PRIORIDADE: ${p.prioridade}\n`;
+        ctx += `UNIDADE: ${p.unidade||'—'} | OSS: ${p.oss||'—'}\n`;
+        if (p.situacao_atual) ctx += `SITUAÇÃO ATUAL: ${p.situacao_atual}\n`;
+        if (p.resumo_ia)      ctx += `ANÁLISE IA: ${p.resumo_ia}\n`;
+        if (p.apontamentos_ia) ctx += `APONTAMENTOS: ${p.apontamentos_ia}\n`;
+
+        const andamentos = (resA.andamentos || []).slice(-5);
+        if (andamentos.length) {
+          ctx += 'ÚLTIMOS ANDAMENTOS:\n';
+          andamentos.forEach(a => ctx += `- ${formatarDataGAS(a.data_movimento)}: ${a.descricao||''}\n`);
+        }
+        const anots = (resAnot.anotacoes || []).slice(-3);
+        if (anots.length) {
+          ctx += 'ANOTAÇÕES DE GESTÃO:\n';
+          anots.forEach(a => ctx += `- ${a.texto||''}\n`);
+        }
+        const blocos = (resConteudo.blocos || []).slice(0, 2);
+        if (blocos.length) ctx += 'CONTEÚDO DOCS (trecho):\n' + blocos[0].conteudo?.substring(0, 800) + '\n';
+      }
+    } else {
+      // Sem match específico: visão geral dos processos
+      ctx = 'PROCESSOS MONITORADOS:\n' + todosProcessos.slice(0, 12).map(p =>
+        `SEI ${p.numero_sei}: ${p.titulo} (${p.status}, ${p.prioridade}, Unidade: ${p.unidade||'—'}) — ${p.situacao_atual||p.resumo_ia||''}`
+      ).join('\n');
+    }
+
+    // Inclui amostra de bases legais relevantes
+    const resBases = await api('bases-legais/listar');
+    const basesBlocos = (resBases.blocos || []).slice(0, 2).map(b => b.conteudo?.substring(0, 600)).join('\n');
+
+    const prompt = `Você é um ESPECIALISTA em gestão de contratos, processos administrativos e regulação de Organizações Sociais de Saúde (OSS) no setor público brasileiro.
+Tem profundo conhecimento em: Lei 9.637/98 (OS), contratos de gestão, licitações na saúde, fiscalização contratual, metas assistenciais e normativas do SUS.
+
+DADOS DO SISTEMA SEI MONITOR:
+${ctx}
+
+${basesBlocos ? 'BASES LEGAIS DISPONÍVEIS:\n' + basesBlocos : ''}
+
+PERGUNTA: ${msg}
+
+Responda em português, de forma objetiva e especializada.
+- Se a pergunta mencionar um processo específico e ele estiver nos dados, analise com detalhes
+- Consulte as bases legais quando pertinente para fundamentar sua resposta
+- Se não encontrar o processo mencionado, informe e ofereça uma análise geral do contexto disponível
+- Máx 300 palavras`;
+
     const resp = await fetch(OLLAMA_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ model:OLLAMA_MODEL, prompt, stream:false }) });
     const data = await resp.json();
     loadMsg.textContent = data.response || 'Sem resposta.';
-  } catch(e) { loadMsg.textContent = 'Erro ao contatar IA: '+e.message; }
+  } catch(e) { loadMsg.textContent = 'Erro ao contatar IA: ' + e.message; }
   msgs.scrollTop = msgs.scrollHeight;
 }
 
@@ -1286,14 +1555,44 @@ function horasDesdeData(dataStr) {
   if (isNaN(d)) return 9999;
   return (Date.now() - d.getTime()) / 3600000;
 }
+
+// Formata datas normais (ISO string)
 function formatarData(s) {
   if (!s) return '—';
-  const d = new Date(s); if (isNaN(d)) return s;
+  const d = new Date(s);
+  if (isNaN(d)) return '—';
   return d.toLocaleDateString('pt-BR');
 }
+
+// Formata data mas retorna '—' para strings inválidas (evita mostrar textos como "Máxima")
+function formatarDataSeguro(s) {
+  if (!s) return '—';
+  const d = new Date(s);
+  if (isNaN(d)) return '—';
+  return d.toLocaleDateString('pt-BR');
+}
+
+// Formata datas vindas do Google Sheets (que podem ter epoch diferente para valores de hora)
+function formatarDataGAS(s) {
+  if (!s) return '';
+  const d = new Date(s);
+  if (isNaN(d)) return String(s);
+  // Sheets armazena datas com hora 03:00 UTC (fuso BR) — mostra apenas a data
+  return d.toLocaleDateString('pt-BR');
+}
+
+// Formata horas vindas do Sheets (epoch 1899-12-30 para valores de hora-apenas)
+function formatarHoraGAS(s) {
+  if (!s) return '';
+  const d = new Date(s);
+  if (isNaN(d)) return String(s);
+  // Extrai apenas HH:MM
+  return d.toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
+}
+
 function formatarDataHora(s) {
   if (!s) return '—';
-  const d = new Date(s); if (isNaN(d)) return s;
+  const d = new Date(s); if (isNaN(d)) return String(s);
   return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
 }
 function formatarTamanho(bytes) {
