@@ -193,6 +193,7 @@ function criarCard(p) {
       </button>
     </div>
     <div class="titulo">${p.titulo}</div>
+    ${p.unidade ? `<div style="font-size:.75rem;color:var(--muted);margin-bottom:4px;"><i class="fa fa-building" style="margin-right:3px;"></i>${p.unidade}${p.oss ? ' · ' + p.oss : ''}</div>` : ''}
     ${p.situacao_atual ? `<div class="situacao" style="font-size:.84rem;">${p.situacao_atual}</div>` : ''}
     ${p.ultimo_andamento_resumo ? `<div class="ultimo-and"><i class="fa fa-clock" style="margin-right:4px;color:var(--muted);"></i>${p.ultimo_andamento_resumo}${p.ultimo_andamento_data ? ' <small>('+formatarDataGAS(p.ultimo_andamento_data)+')</small>' : ''}</div>` : ''}
     <div class="card-footer">
@@ -343,7 +344,6 @@ async function abrirProcesso(sei) {
       <span><b>Tipo:</b> ${proc.tipo||'—'}</span>
       <span><b>Unidade:</b> ${proc.unidade||'—'}</span>
       <span><b>OSS:</b> ${proc.oss||'—'}</span>
-      <span><b>Cadastro:</b> ${formatarDataSeguro(proc.data_cadastro)}</span>
       <span><b>Atualização:</b> ${formatarDataSeguro(proc.data_atualizacao)}</span>
     </div>
     ${proc.descricao ? `<p style="margin-top:10px;font-size:.85rem;color:#374151;">${proc.descricao}</p>` : ''}
