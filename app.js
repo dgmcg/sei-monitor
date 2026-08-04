@@ -354,6 +354,7 @@ async function abrirProcesso(sei) {
     <div class="tab" onclick="switchTab(this,'tab-anotacoes')">Anotações (${anotacoes.length})</div>
     <div class="tab" onclick="switchTab(this,'tab-andamentos')">Andamentos (${andamentos.length})</div>
     <div class="tab" onclick="switchTab(this,'tab-documentos')">Documentos (${documentos.length})</div>
+    ${proc.unidade ? `<div class="tab" onclick="switchTab(this,'tab-unidade')"><i class="fa fa-building" style="margin-right:4px;"></i>${proc.unidade}</div>` : ''}
   </div>
 
   <!-- ABA: ANÁLISE IA (padrão) -->
@@ -413,7 +414,44 @@ async function abrirProcesso(sei) {
           ? `<a href="${d.link_verificacao}" target="_blank" class="btn btn-secondary btn-sm" title="Verificar no SEI"><i class="fa fa-check-circle"></i> SEI</a>`
           : d.link_sei ? `<a href="${d.link_sei}" target="_blank" class="btn btn-secondary btn-sm"><i class="fa fa-external-link-alt"></i></a>` : ''}
       </div>`).join('') : '<p class="text-muted">Nenhum documento importado.</p>'}
-  </div>`;
+  </div>
+
+  <!-- ABA: PROCESSOS DA UNIDADE -->
+  ${proc.unidade ? (() => {
+    const relacionados = todosProcessos.filter(p => p.unidade === proc.unidade && p.numero_sei !== sei);
+    const emAndamento  = relacionados.filter(p => p.status === 'Em andamento');
+    const outros       = relacionados.filter(p => p.status !== 'Em andamento');
+    return `<div id="tab-unidade" class="hidden">
+      <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:.83rem;color:#0369a1;">
+        <i class="fa fa-building"></i> <b>${proc.unidade}</b>${proc.oss ? ' · ' + proc.oss : ''} — ${relacionados.length} processo(s) monitorado(s)
+      </div>
+      ${emAndamento.length ? `
+        <div style="font-weight:600;font-size:.82rem;color:#374151;margin-bottom:8px;">Em andamento (${emAndamento.length})</div>
+        ${emAndamento.map(p => {
+          const priBadge2 = (p.prioridade||'').replace('á','a').replace('é','e');
+          return `<div class="process-card" onclick="abrirProcesso('${p.numero_sei}')" style="cursor:pointer;margin-bottom:8px;">
+            <div style="font-size:.73rem;color:var(--muted);margin-bottom:2px;">SEI: ${p.numero_sei}</div>
+            <div style="font-weight:600;font-size:.9rem;margin-bottom:4px;">${p.titulo}</div>
+            ${p.situacao_atual ? `<div style="font-size:.8rem;color:#374151;margin-bottom:6px;">${p.situacao_atual.substring(0,120)}${p.situacao_atual.length>120?'...':''}</div>` : ''}
+            <div class="card-footer">
+              <span class="badge-prioridade ${priBadge2}">${p.prioridade}</span>
+              <span class="badge-status">${p.status}</span>
+              ${p.data_atualizacao ? `<span style="font-size:.72rem;color:var(--muted);">Atualizado ${formatarDataSeguro(p.data_atualizacao)}</span>` : ''}
+            </div>
+          </div>`;
+        }).join('')}` : '<p class="text-muted">Nenhum processo em andamento para esta unidade.</p>'}
+      ${outros.length ? `
+        <div style="font-weight:600;font-size:.82rem;color:var(--muted);margin:16px 0 8px;">Outros status (${outros.length})</div>
+        ${outros.map(p => `
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;cursor:pointer;font-size:.83rem;" onclick="abrirProcesso('${p.numero_sei}')">
+            <div>
+              <span style="color:var(--muted);margin-right:6px;">${p.numero_sei}</span>
+              <span>${p.titulo}</span>
+            </div>
+            <span class="badge-status">${p.status}</span>
+          </div>`).join('')}` : ''}
+    </div>`;
+  })() : ''}`;
 
   window._processoAtual = proc;
 }
@@ -442,7 +480,7 @@ async function acionarIAManual(sei) {
 function switchTab(el, id) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
-  ['tab-ia','tab-anotacoes','tab-andamentos','tab-documentos'].forEach(t => {
+  ['tab-ia','tab-anotacoes','tab-andamentos','tab-documentos','tab-unidade'].forEach(t => {
     const el2 = document.getElementById(t);
     if (el2) el2.classList.toggle('hidden', t !== id);
   });
@@ -1098,13 +1136,42 @@ function renderWizardStep() {
   }
 }
 
-function wizardNext() {
+async function wizardNext() {
   if (wizardStep === 1) {
-    novoProc.sei   = document.getElementById('w-sei').value.trim();
+    novoProc.sei    = document.getElementById('w-sei').value.trim();
     novoProc.titulo = document.getElementById('w-titulo').value.trim();
-    novoProc.tipo  = document.getElementById('w-tipo').value;
+    novoProc.tipo   = document.getElementById('w-tipo').value;
     if (novoProc.tipo === '__novo__') novoProc.tipo = '';
     if (!novoProc.sei || !novoProc.titulo) { alert('Preencha SEI e Título.'); return; }
+
+    // Verifica duplicata — primeiro no cache local, depois na API
+    const jaExiste = todosProcessos.find(p => p.numero_sei === novoProc.sei);
+    if (jaExiste) {
+      const body = document.getElementById('wizard-body');
+      body.innerHTML += `
+        <div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:14px;margin-top:12px;">
+          <div style="font-weight:600;color:#dc2626;margin-bottom:6px;"><i class="fa fa-exclamation-circle"></i> Processo já monitorado</div>
+          <div style="font-size:.85rem;color:#374151;">O SEI <b>${novoProc.sei}</b> já está cadastrado como <b>"${jaExiste.titulo}"</b> (${jaExiste.status}, ${jaExiste.prioridade}).</div>
+          <button class="btn btn-secondary btn-sm" style="margin-top:10px;" onclick="abrirProcesso('${jaExiste.numero_sei}');showView('dashboard');">
+            <i class="fa fa-arrow-right"></i> Abrir processo existente
+          </button>
+        </div>`;
+      return;
+    }
+    // Confirma na API (garante consistência mesmo sem cache)
+    const res = await api('processos/obter?sei=' + encodeURIComponent(novoProc.sei));
+    if (res.ok) {
+      const body = document.getElementById('wizard-body');
+      body.innerHTML += `
+        <div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:14px;margin-top:12px;">
+          <div style="font-weight:600;color:#dc2626;margin-bottom:6px;"><i class="fa fa-exclamation-circle"></i> Processo já monitorado</div>
+          <div style="font-size:.85rem;color:#374151;">O SEI <b>${novoProc.sei}</b> já está cadastrado como <b>"${res.processo.titulo}"</b>.</div>
+          <button class="btn btn-secondary btn-sm" style="margin-top:10px;" onclick="abrirProcesso('${novoProc.sei}');">
+            <i class="fa fa-arrow-right"></i> Abrir processo existente
+          </button>
+        </div>`;
+      return;
+    }
   } else if (wizardStep === 2) {
     novoProc.status    = document.getElementById('w-status').value;
     novoProc.prioridade = document.getElementById('w-prioridade').value;
