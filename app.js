@@ -997,6 +997,11 @@ let wizardStep = 1, novoProc = {};
 async function renderNovo() {
   wizardStep = 1; novoProc = {};
   await carregarDadosFixos();
+  // Garante que todosProcessos esteja carregado mesmo sem passar pelo Dashboard
+  if (!todosProcessos.length) {
+    const res = await api('processos/listar');
+    if (res.ok) todosProcessos = res.processos || [];
+  }
   document.getElementById('content').innerHTML = `
   <div style="max-width:680px;margin:0 auto;">
     <div class="wizard-steps" id="wizard-steps">
