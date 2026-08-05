@@ -1113,11 +1113,11 @@ async function renderNovo() {
   document.getElementById('content').innerHTML = `
   <div style="max-width:680px;margin:0 auto;">
     <div class="wizard-steps" id="wizard-steps">
-      <div class="wizard-step active" id="ws1">1. Identificação</div>
-      <div class="wizard-step" id="ws2">2. Detalhes</div>
-      <div class="wizard-step" id="ws3">3. Documentos</div>
-      <div class="wizard-step" id="ws4">4. Andamentos</div>
-      <div class="wizard-step" id="ws5">5. Confirmar</div>
+      <div class="wizard-step active" id="ws1" onclick="irParaEtapa(1)" style="cursor:pointer;">1. Identificação</div>
+      <div class="wizard-step" id="ws2" onclick="irParaEtapa(2)" style="cursor:pointer;">2. Detalhes</div>
+      <div class="wizard-step" id="ws3" onclick="irParaEtapa(3)" style="cursor:pointer;">3. Documentos</div>
+      <div class="wizard-step" id="ws4" onclick="irParaEtapa(4)" style="cursor:pointer;">4. Andamentos</div>
+      <div class="wizard-step" id="ws5" onclick="irParaEtapa(5)" style="cursor:pointer;">5. Confirmar</div>
     </div>
     <div id="wizard-body" style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:24px;"></div>
   </div>`;
@@ -1139,7 +1139,9 @@ function renderWizardStep() {
         </select>
         ${_tipos.length ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">${_tipos.map(t=>`<span style="background:#f3f4f6;border-radius:4px;padding:2px 8px;font-size:.75rem;">${t}<button onclick="excluirTipo('${t}')" style="background:none;border:none;cursor:pointer;color:#ef4444;margin-left:2px;">✕</button></span>`).join('')}</div>` : ''}
       </div>
-      <div class="flex gap-2 mt-4"><button class="btn btn-primary" onclick="wizardNext()">Próximo <i class="fa fa-arrow-right"></i></button></div>`;
+      <div class="flex gap-2 mt-4">
+        <button class="btn btn-primary" onclick="wizardNext()">Próximo <i class="fa fa-arrow-right"></i></button>
+      </div>`;
   } else if (wizardStep === 2) {
     body.innerHTML = `
       <h3 style="margin-bottom:16px;">Detalhes do Processo</h3>
@@ -1187,18 +1189,40 @@ function renderWizardStep() {
         <button class="btn btn-secondary" onclick="wizardPrev()"><i class="fa fa-arrow-left"></i> Voltar</button>
         <button class="btn btn-primary" onclick="wizardNext()">Próximo <i class="fa fa-arrow-right"></i></button></div>`;
   } else if (wizardStep === 5) {
+    // Campos obrigatórios faltando
+    const faltaSEI    = !novoProc.sei;
+    const faltaTitulo = !novoProc.titulo;
+    const alertaObrig = (faltaSEI || faltaTitulo)
+      ? `<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:.83rem;color:#dc2626;">
+           ⚠️ Preencha os campos obrigatórios antes de salvar:
+           ${faltaSEI ? '<br>• Número SEI (<a href="#" onclick="irParaEtapa(1);return false;">Etapa 1</a>)' : ''}
+           ${faltaTitulo ? '<br>• Título / Objeto (<a href="#" onclick="irParaEtapa(1);return false;">Etapa 1</a>)' : ''}
+         </div>` : '';
+    // Aviso de processo já cadastrado
+    const jaExiste = todosProcessos.find(p => p.numero_sei === novoProc.sei);
+    const alertaDup = (jaExiste && novoProc.sei)
+      ? `<div style="background:#fef3c7;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:.83rem;color:#92400e;">
+           ⚠️ O processo <b>${novoProc.sei}</b> já está monitorado como "<b>${jaExiste.titulo}</b>".
+           <br><a href="#" onclick="abrirProcesso('${jaExiste.numero_sei}');showView('dashboard');return false;">Abrir processo existente →</a>
+         </div>` : '';
     body.innerHTML = `
       <h3 style="margin-bottom:16px;">Confirmar Cadastro</h3>
-      <div style="background:#f9fafb;border-radius:8px;padding:16px;font-size:.85rem;margin-bottom:16px;">
-        <b>SEI:</b> ${novoProc.sei}<br><b>Título:</b> ${novoProc.titulo}<br>
-        <b>Tipo:</b> ${novoProc.tipo||'—'} — <b>Status:</b> ${novoProc.status} — <b>Prioridade:</b> ${novoProc.prioridade}<br>
-        <b>Unidade:</b> ${novoProc.unidade||'—'} — <b>OSS:</b> ${novoProc.oss||'—'}<br>
-        <b>Documentos:</b> ${novoProc._files?novoProc._files.length:0} — <b>Andamentos:</b> ${novoProc.andamentos?'Sim':'Não'}
+      ${alertaObrig}${alertaDup}
+      <div style="background:#f9fafb;border-radius:8px;padding:16px;font-size:.85rem;margin-bottom:16px;line-height:1.8;">
+        <b>SEI:</b> ${novoProc.sei || '<span style="color:#dc2626">não informado</span>'}<br>
+        <b>Título:</b> ${novoProc.titulo || '<span style="color:#dc2626">não informado</span>'}<br>
+        <b>Tipo:</b> ${novoProc.tipo||'—'} &nbsp;·&nbsp; <b>Status:</b> ${novoProc.status||'Em andamento'} &nbsp;·&nbsp; <b>Prioridade:</b> ${novoProc.prioridade||'Média'}<br>
+        <b>Unidade:</b> ${novoProc.unidade||'—'} &nbsp;·&nbsp; <b>OSS:</b> ${novoProc.oss||'—'}<br>
+        <b>Documentos:</b> ${novoProc._files ? novoProc._files.length : 0} &nbsp;·&nbsp;
+        <b>Andamentos:</b> ${novoProc.andamentos ? novoProc.andamentos.split('\n').length + ' linha(s)' : 'Nenhum'}
       </div>
       <div id="novo-status"></div>
       <div class="flex gap-2 mt-4">
         <button class="btn btn-secondary" onclick="wizardPrev()"><i class="fa fa-arrow-left"></i> Voltar</button>
-        <button class="btn btn-success" onclick="cadastrarProcesso()"><i class="fa fa-save"></i> Cadastrar Processo</button></div>`;
+        <button class="btn btn-success" onclick="cadastrarProcesso()" ${(faltaSEI||faltaTitulo)?'disabled title="Preencha SEI e Título primeiro"':''}>
+          <i class="fa fa-save"></i> Cadastrar Processo
+        </button>
+      </div>`;
   }
   for (let i = 1; i <= 5; i++) {
     const ws = document.getElementById('ws'+i);
@@ -1206,56 +1230,34 @@ function renderWizardStep() {
   }
 }
 
-async function wizardNext() {
+// Salva os dados do campo atual em novoProc (sem validar)
+function salvarEtapaAtual() {
   if (wizardStep === 1) {
-    novoProc.sei    = document.getElementById('w-sei').value.trim();
-    novoProc.titulo = document.getElementById('w-titulo').value.trim();
-    novoProc.tipo   = document.getElementById('w-tipo').value;
+    novoProc.sei    = (document.getElementById('w-sei')?.value    || '').trim();
+    novoProc.titulo = (document.getElementById('w-titulo')?.value || '').trim();
+    novoProc.tipo   = document.getElementById('w-tipo')?.value    || '';
     if (novoProc.tipo === '__novo__') novoProc.tipo = '';
-    if (!novoProc.sei || !novoProc.titulo) { alert('Preencha SEI e Título.'); return; }
-
-    // Verifica duplicata — primeiro no cache local, depois na API
-    const jaExiste = todosProcessos.find(p => p.numero_sei === novoProc.sei);
-    if (jaExiste) {
-      const body = document.getElementById('wizard-body');
-      body.innerHTML += `
-        <div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:14px;margin-top:12px;">
-          <div style="font-weight:600;color:#dc2626;margin-bottom:6px;"><i class="fa fa-exclamation-circle"></i> Processo já monitorado</div>
-          <div style="font-size:.85rem;color:#374151;">O SEI <b>${novoProc.sei}</b> já está cadastrado como <b>"${jaExiste.titulo}"</b> (${jaExiste.status}, ${jaExiste.prioridade}).</div>
-          <button class="btn btn-secondary btn-sm" style="margin-top:10px;" onclick="abrirProcesso('${jaExiste.numero_sei}');showView('dashboard');">
-            <i class="fa fa-arrow-right"></i> Abrir processo existente
-          </button>
-        </div>`;
-      return;
-    }
-    // Confirma na API (garante consistência mesmo sem cache)
-    const res = await api('processos/obter?sei=' + encodeURIComponent(novoProc.sei));
-    if (res.ok) {
-      const body = document.getElementById('wizard-body');
-      body.innerHTML += `
-        <div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:14px;margin-top:12px;">
-          <div style="font-weight:600;color:#dc2626;margin-bottom:6px;"><i class="fa fa-exclamation-circle"></i> Processo já monitorado</div>
-          <div style="font-size:.85rem;color:#374151;">O SEI <b>${novoProc.sei}</b> já está cadastrado como <b>"${res.processo.titulo}"</b>.</div>
-          <button class="btn btn-secondary btn-sm" style="margin-top:10px;" onclick="abrirProcesso('${novoProc.sei}');">
-            <i class="fa fa-arrow-right"></i> Abrir processo existente
-          </button>
-        </div>`;
-      return;
-    }
   } else if (wizardStep === 2) {
-    novoProc.status    = document.getElementById('w-status').value;
-    novoProc.prioridade = document.getElementById('w-prioridade').value;
-    novoProc.unidade   = document.getElementById('w-unidade')?.value || '';
+    novoProc.status    = document.getElementById('w-status')?.value      || 'Em andamento';
+    novoProc.prioridade = document.getElementById('w-prioridade')?.value || 'Média';
+    novoProc.unidade   = document.getElementById('w-unidade')?.value     || '';
     if (novoProc.unidade === '__nova__') novoProc.unidade = '';
-    novoProc.oss       = document.getElementById('w-oss')?.value.trim() || '';
-    novoProc.descricao = document.getElementById('w-descricao').value.trim();
+    novoProc.oss       = (document.getElementById('w-oss')?.value.trim()       || '');
+    novoProc.descricao = (document.getElementById('w-descricao')?.value.trim() || '');
   } else if (wizardStep === 4) {
-    novoProc.andamentos = document.getElementById('w-andamentos').value.trim();
+    novoProc.andamentos = (document.getElementById('w-andamentos')?.value.trim() || '');
   }
-  wizardStep = Math.min(wizardStep + 1, 5);
+}
+
+// Navega para qualquer etapa (clique no indicador ou botões Voltar/Próximo)
+function irParaEtapa(n) {
+  salvarEtapaAtual();
+  wizardStep = Math.max(1, Math.min(n, 5));
   renderWizardStep();
 }
-function wizardPrev() { wizardStep = Math.max(wizardStep - 1, 1); renderWizardStep(); }
+
+function wizardNext() { irParaEtapa(wizardStep + 1); }
+function wizardPrev() { irParaEtapa(wizardStep - 1); }
 
 function mostrarArquivosSelecionados() {
   const el = document.getElementById('files-selecionados');
@@ -1266,6 +1268,17 @@ function mostrarArquivosSelecionados() {
 }
 
 async function cadastrarProcesso() {
+  // Garante que os dados da etapa atual estão salvos
+  salvarEtapaAtual();
+
+  // Validação dos campos obrigatórios
+  if (!novoProc.sei || !novoProc.titulo) {
+    const statusEl = document.getElementById('novo-status');
+    if (statusEl) statusEl.innerHTML = '<div class="alert alert-danger">⚠️ Preencha o Número SEI e o Título antes de salvar.</div>';
+    irParaEtapa(1);
+    return;
+  }
+
   const statusEl = document.getElementById('novo-status');
   statusEl.innerHTML = '<span class="spinner"></span> Cadastrando processo...';
 
