@@ -23,8 +23,68 @@ window.onload = () => {
   const chatFab = document.getElementById('chat-fab');
   if (chatFab) chatFab.style.display = 'none';
   verificarOllama();
+  // Extensão Chrome: salva rascunho do hash antes de limpar a URL
+  _lerRascunhoExtensaoDoHash();
 };
 
+// ==================== EXTENSÃO CHROME: RASCUNHO ====================
+// Lê o hash #rascunho=BASE64 que a extensão adiciona ao abrir o monitor.
+// Guarda no sessionStorage e limpa a URL para não aparecer na barra.
+function _lerRascunhoExtensaoDoHash() {
+  try {
+    const hash = window.location.hash;
+    if (!hash || !hash.includes('rascunho=')) return;
+    const b64   = hash.replace(/^#/, '').replace(/^.*rascunho=/, '');
+    const dados = JSON.parse(decodeURIComponent(escape(atob(b64))));
+    sessionStorage.setItem('sei_rascunho_extensao', JSON.stringify(dados));
+    if (history.replaceState) history.replaceState(null, '', window.location.pathname + window.location.search);
+  } catch (e) { /* hash inválido ou ausente */ }
+}
+
+// Preenche o formulário "Novo Processo" (renderNovo já foi chamado e resetou novoProc).
+// Usamos setTimeout para esperar o DOM renderizar antes de manipular os campos.
+function _preencherRascunhoNoFormulario() {
+  try {
+    const raw = sessionStorage.getItem('sei_rascunho_extensao');
+    if (!raw) return;
+    const d = JSON.parse(raw);
+    sessionStorage.removeItem('sei_rascunho_extensao');
+
+    // Preenche os campos da etapa 1
+    const eSei    = document.getElementById('w-sei');
+    const eTitulo = document.getElementById('w-titulo');
+    const eTipo   = document.getElementById('w-tipo');
+    if (eSei)    eSei.value    = d.numero_sei || '';
+    if (eTitulo) eTitulo.value = d.titulo || '';  // deixa vazio para o usuário preencher
+    if (eTipo && d.tipo) {
+      const tipoLow = d.tipo.toLowerCase();
+      for (let i = 0; i < eTipo.options.length; i++) {
+        const v = eTipo.options[i].value.toLowerCase();
+        if (v && (tipoLow.includes(v) || v.includes(tipoLow.split(' ')[0]))) {
+          eTipo.selectedIndex = i;
+          if (typeof tipoSelecionado === 'function') tipoSelecionado();
+          break;
+        }
+      }
+    }
+
+    // Armazena no novoProc para as próximas etapas do wizard
+    novoProc.sei              = d.numero_sei   || '';
+    novoProc.unidade          = d.unidade      || '';
+    novoProc.tipo             = d.tipo         || '';
+    novoProc.andamentos       = d.andamentos_texto || '';
+
+    // Aviso visual
+    const count = d.andamentos_count || 0;
+    if (count > 0) {
+      const banner = document.createElement('div');
+      banner.style.cssText = 'background:#dcfce7;border:1px solid #16a34a;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:#15803d;';
+      banner.innerHTML = '✅ <b>' + count + ' andamento(s)</b> importado(s) da extensão SEI Monitor. Revise os dados abaixo e salve.';
+      const content = document.getElementById('content');
+      if (content && content.firstChild) content.insertBefore(banner, content.firstChild);
+    }
+  } catch (e) { console.warn('SEI Monitor rascunho:', e); }
+}
 // ==================== API ====================
 async function api(path, body = null) {
   const [basePath, queryStr] = path.split('?');
@@ -94,7 +154,13 @@ function iniciarApp() {
   const chatFab = document.getElementById('chat-fab');
   if (chatFab) chatFab.style.display = '';
   carregarDadosFixos();
-  showView('dashboard');
+  // Extensão Chrome: verifica se há rascunho de processo importado
+  if (sessionStorage.getItem('sei_rascunho_extensao')) {
+    showView('novo');
+    setTimeout(_preencherRascunhoNoFormulario, 600);
+  } else {
+    showView('dashboard');
+  }
   verificarOllama();
 }
 
