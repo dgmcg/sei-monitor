@@ -33,11 +33,25 @@ window.onload = () => {
 function _lerRascunhoExtensaoDoHash() {
   try {
     const hash = window.location.hash;
-    if (!hash || !hash.includes('rascunho=')) return;
-    const b64   = hash.replace(/^#/, '').replace(/^.*rascunho=/, '');
-    const dados = JSON.parse(decodeURIComponent(escape(atob(b64))));
-    sessionStorage.setItem('sei_rascunho_extensao', JSON.stringify(dados));
-    if (history.replaceState) history.replaceState(null, '', window.location.pathname + window.location.search);
+    if (!hash) return;
+
+    // #abrir=SEI_NUMBER → Flow A: abre detalhe do processo após login
+    if (hash.includes('abrir=')) {
+      const sei = decodeURIComponent(
+        hash.replace(/^#/, '').replace(/^.*abrir=/, '').split('&')[0]
+      );
+      if (sei) sessionStorage.setItem('sei_abrir_processo', sei);
+      if (history.replaceState) history.replaceState(null, '', window.location.pathname + window.location.search);
+      return;
+    }
+
+    // #rascunho=BASE64 → Flow B: pré-preenche formulário após login
+    if (hash.includes('rascunho=')) {
+      const b64   = hash.replace(/^#/, '').replace(/^.*rascunho=/, '');
+      const dados = JSON.parse(decodeURIComponent(escape(atob(b64))));
+      sessionStorage.setItem('sei_rascunho_extensao', JSON.stringify(dados));
+      if (history.replaceState) history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
   } catch (e) { /* hash inválido ou ausente */ }
 }
 
@@ -154,8 +168,15 @@ function iniciarApp() {
   const chatFab = document.getElementById('chat-fab');
   if (chatFab) chatFab.style.display = '';
   carregarDadosFixos();
-  // Extensão Chrome: verifica se há rascunho de processo importado
-  if (sessionStorage.getItem('sei_rascunho_extensao')) {
+  // Extensão Chrome: decide qual view abrir após o login
+  const _seiParaAbrir = sessionStorage.getItem('sei_abrir_processo');
+  if (_seiParaAbrir) {
+    // Flow A: processo existente atualizado → abre detalhe direto
+    sessionStorage.removeItem('sei_abrir_processo');
+    showView('dashboard');
+    setTimeout(function () { abrirProcesso(_seiParaAbrir); }, 500);
+  } else if (sessionStorage.getItem('sei_rascunho_extensao')) {
+    // Flow B: processo novo → abre formulário pré-preenchido
     showView('novo');
     setTimeout(_preencherRascunhoNoFormulario, 600);
   } else {
@@ -1320,7 +1341,25 @@ async function cadastrarProcesso() {
     await gerarResumoAndamentos(novoProc.sei);
   }
 
-  if (novoProc._files?.length || novoProc.andamentos) {
+  // ── Documentos da extensão Chrome (extraídos em background) ──
+  const docsExt = await api('extensao/recuperar-docs?sei=' + encodeURIComponent(novoProc.sei));
+  if (docsExt.ok && docsExt.documentos && docsExt.documentos.length > 0) {
+    statusEl.innerHTML = `<span class="spinner"></span> Indexando ${docsExt.documentos.length} documento(s) da extensão...`;
+    for (const doc of docsExt.documentos) {
+      if (!doc.texto || doc.texto.length < 20) continue;
+      try {
+        const docId  = 'ext_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+        const resReg = await api('documentos/registrar', {
+          numero_sei: novoProc.sei, nome_arquivo: doc.nome,
+          hash_arquivo: '', tamanho: doc.texto.length, link_verificacao: ''
+        });
+        const idParaSalvar = (resReg.ok && resReg.doc_id) ? resReg.doc_id : docId;
+        await salvarBlocosSheets(novoProc.sei, idParaSalvar, doc.nome, doc.texto);
+      } catch(eDoc) { console.warn('Erro ao indexar doc:', doc.nome, eDoc); }
+    }
+  }
+
+  if (novoProc._files?.length || novoProc.andamentos || (docsExt.documentos && docsExt.documentos.length)) {
     statusEl.innerHTML = '<span class="spinner"></span> Gerando análise de IA...';
     await acionarIA(novoProc.sei);
   }
