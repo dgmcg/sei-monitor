@@ -83,10 +83,11 @@ function _preencherRascunhoNoFormulario() {
     }
 
     // Armazena no novoProc para as próximas etapas do wizard
-    novoProc.sei              = d.numero_sei   || '';
-    novoProc.unidade          = d.unidade      || '';
-    novoProc.tipo             = d.tipo         || '';
-    novoProc.andamentos       = d.andamentos_texto || '';
+    novoProc.sei                  = d.numero_sei       || '';
+    novoProc.unidade              = d.unidade          || '';
+    novoProc.tipo                 = d.tipo             || '';
+    novoProc.andamentos           = d.andamentos_texto || '';
+    novoProc._docListExtensao     = d.docList          || [];  // lista exibida no Step 3
 
     // Aviso visual
     const count = d.andamentos_count || 0;
@@ -1187,8 +1188,42 @@ function renderWizardStep() {
     // Se já havia unidade selecionada, mostrar processos relacionados
     if (novoProc.unidade) mostrarProcessosDaUnidade(novoProc.unidade, 'processos-unidade-info');
   } else if (wizardStep === 3) {
+    // Documentos detectados pela extensão Chrome
+    const extDocs = Array.isArray(novoProc._docListExtensao) ? novoProc._docListExtensao : [];
+    const extDocsHtml = extDocs.length > 0 ? `
+      <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:16px;margin-bottom:20px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+          <span style="font-size:1.1rem;">🤖</span>
+          <span style="font-weight:600;color:#15803d;font-size:.9rem;">
+            ${extDocs.length} documento(s) detectado(s) pela extensão SEI Monitor
+          </span>
+          <span style="margin-left:auto;background:#dcfce7;color:#15803d;font-size:.75rem;padding:3px 10px;border-radius:12px;font-weight:500;">
+            Indexação automática ✓
+          </span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          ${extDocs.map(function(d) {
+            const nome = (typeof d === 'object' ? (d.nome || d.name || '') : String(d)) || 'Documento';
+            return `<div style="background:#fff;border:1px solid #bbf7d0;border-radius:6px;padding:9px 12px;font-size:.82rem;display:flex;align-items:center;gap:10px;">
+              <span style="color:#6b7280;">📄</span>
+              <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${nome}">${nome}</span>
+              <span style="background:#dcfce7;color:#15803d;font-size:.72rem;padding:2px 8px;border-radius:10px;white-space:nowrap;flex-shrink:0;">✓ será indexado</span>
+            </div>`;
+          }).join('')}
+        </div>
+        <p style="font-size:.77rem;color:#6b7280;margin-top:10px;margin-bottom:0;">
+          O texto desses documentos será extraído e indexado automaticamente ao salvar o processo.
+        </p>
+      </div>` : '';
+
+    const manualLabel = extDocs.length > 0
+      ? '<div style="font-size:.85rem;color:var(--muted);margin-bottom:8px;">Adicionar outros documentos manualmente (opcional):</div>'
+      : '';
+
     body.innerHTML = `
-      <h3 style="margin-bottom:16px;">Documentos (opcional)</h3>
+      <h3 style="margin-bottom:16px;">Documentos</h3>
+      ${extDocsHtml}
+      ${manualLabel}
       <div class="dropzone" id="dropzone-novo" onclick="document.getElementById('file-novo').click()">
         <i class="fa fa-cloud-upload-alt"></i><p>Arraste documentos ou clique para selecionar</p>
         <p style="font-size:.75rem;color:var(--muted);">PDF, DOCX, XLSX, ZIP, HTML</p></div>
@@ -1234,7 +1269,8 @@ function renderWizardStep() {
         <b>Título:</b> ${novoProc.titulo || '<span style="color:#dc2626">não informado</span>'}<br>
         <b>Tipo:</b> ${novoProc.tipo||'—'} &nbsp;·&nbsp; <b>Status:</b> ${novoProc.status||'Em andamento'} &nbsp;·&nbsp; <b>Prioridade:</b> ${novoProc.prioridade||'Média'}<br>
         <b>Unidade:</b> ${novoProc.unidade||'—'} &nbsp;·&nbsp; <b>OSS:</b> ${novoProc.oss||'—'}<br>
-        <b>Documentos:</b> ${novoProc._files ? novoProc._files.length : 0} &nbsp;·&nbsp;
+        <b>Docs manuais:</b> ${novoProc._files ? novoProc._files.length : 0} &nbsp;·&nbsp;
+        <b>Docs extensão:</b> ${(novoProc._docListExtensao || []).length} (indexação auto) &nbsp;·&nbsp;
         <b>Andamentos:</b> ${novoProc.andamentos ? novoProc.andamentos.split('\n').length + ' linha(s)' : 'Nenhum'}
       </div>
       <div id="novo-status"></div>
