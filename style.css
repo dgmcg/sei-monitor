@@ -49,9 +49,18 @@ body{font-family:'Segoe UI',sans-serif;background:var(--bg);color:var(--text);di
 .badge-status{font-size:.72rem;padding:3px 8px;border-radius:20px;background:#e5e7eb;color:#374151;}
 
 /* ALERTAS VISUAIS */
-@keyframes pulse-max{0%,100%{box-shadow:0 0 0 0 rgba(124,58,237,.4);}50%{box-shadow:0 0 0 8px rgba(124,58,237,0);}}
-@keyframes pulse-alt{0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,.3);}50%{box-shadow:0 0 0 6px rgba(220,38,38,0);}}
+@keyframes pulse-max{0%,100%{box-shadow:0 0 0 0 rgba(124,58,237,.5);}50%{box-shadow:0 0 0 9px rgba(124,58,237,0);}}
+@keyframes pulse-alt{0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,.35);}50%{box-shadow:0 0 0 7px rgba(220,38,38,0);}}
 @keyframes pulse-med{0%,100%{box-shadow:0 0 0 0 rgba(202,138,4,.3);}50%{box-shadow:0 0 0 5px rgba(202,138,4,0);}}
+/* Verificar hoje (dentro de 24h do prazo) */
+@keyframes pulse-hoje{0%,100%{box-shadow:0 0 0 0 rgba(37,99,235,.25);}50%{box-shadow:0 0 0 6px rgba(37,99,235,0);}}
+.alerta-hoje{border-color:#3b82f6!important;animation:pulse-hoje 2.2s infinite;}
+/* Atrasado (passou do prazo) — pulso mais rápido e intenso */
+@keyframes pulse-atrasado{0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,.55);}50%{box-shadow:0 0 0 10px rgba(220,38,38,0);}}
+.alerta-atrasado{border-color:#dc2626!important;animation:pulse-atrasado 0.9s infinite;}
+/* Muito atrasado (2+ dias) — pulso rápido e fundo tingido */
+@keyframes pulse-muito-atrasado{0%,100%{box-shadow:0 0 0 0 rgba(185,28,28,.7);}50%{box-shadow:0 0 0 14px rgba(185,28,28,0);}}
+.alerta-muito-atrasado{border-color:#991b1b!important;background:rgba(254,242,242,.45)!important;animation:pulse-muito-atrasado 0.6s infinite;}
 .alerta-maxima{border-color:#7c3aed!important;animation:pulse-max 1.2s infinite;}
 .alerta-alta{border-color:#dc2626!important;animation:pulse-alt 1.8s infinite;}
 .alerta-media{border-color:#ca8a04!important;animation:pulse-med 2.5s infinite;}
