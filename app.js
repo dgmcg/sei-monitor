@@ -1341,20 +1341,26 @@ async function cadastrarProcesso() {
     await gerarResumoAndamentos(novoProc.sei);
   }
 
-  // ── Documentos da extensão Chrome (extraídos em background) ──
+  // ── Documentos da extensão Chrome (extraídos via ZIP pelo backend) ──
   const docsExt = await api('extensao/recuperar-docs?sei=' + encodeURIComponent(novoProc.sei));
-  if (docsExt.ok && docsExt.documentos && docsExt.documentos.length > 0) {
-    statusEl.innerHTML = `<span class="spinner"></span> Indexando ${docsExt.documentos.length} documento(s) da extensão...`;
-    for (const doc of docsExt.documentos) {
-      if (!doc.texto || doc.texto.length < 20) continue;
+  const listaDocsExt = Array.isArray(docsExt.documentos) ? docsExt.documentos : [];
+  if (docsExt.ok && listaDocsExt.length > 0) {
+    statusEl.innerHTML = `<span class="spinner"></span> Indexando ${listaDocsExt.length} documento(s) da extensão...`;
+    for (const doc of listaDocsExt) {
       try {
-        const docId  = 'ext_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+        const texto = (typeof doc.texto === 'string') ? doc.texto : '';
+        // Registra o doc mesmo sem texto (nome aparece na aba Documentos)
         const resReg = await api('documentos/registrar', {
           numero_sei: novoProc.sei, nome_arquivo: doc.nome,
-          hash_arquivo: '', tamanho: doc.texto.length, link_verificacao: ''
+          hash_arquivo: '', tamanho: texto.length, link_verificacao: ''
         });
-        const idParaSalvar = (resReg.ok && resReg.doc_id) ? resReg.doc_id : docId;
-        await salvarBlocosSheets(novoProc.sei, idParaSalvar, doc.nome, doc.texto);
+        // Salva blocos de conteúdo apenas se há texto suficiente
+        if (texto.length >= 20) {
+          const idParaSalvar = (resReg.ok && resReg.doc_id)
+            ? resReg.doc_id
+            : ('ext_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6));
+          await salvarBlocosSheets(novoProc.sei, idParaSalvar, doc.nome, texto);
+        }
       } catch(eDoc) { console.warn('Erro ao indexar doc:', doc.nome, eDoc); }
     }
   }
