@@ -4,6 +4,33 @@
 
 // ==================== CONFIG ====================
 const LIMITE_HORAS = { 'Máxima': 48, 'Alta': 96, 'Média': 168, 'Baixa': 336 };
+
+// ── Urgência: pontuação para ordenação dos cards ─────────────
+function _urgenciaScore(p) {
+  if (p.status === 'Concluído') return -1000;
+  const horas  = horasDesdeData(p.data_atualizacao || p.data_cadastro);
+  const limite = LIMITE_HORAS[p.prioridade] || 336;
+  const prioOrd = { 'Máxima': 4, 'Alta': 3, 'Média': 2, 'Baixa': 1 };
+  const prio = prioOrd[p.prioridade] || 1;
+  if (horas > limite) {
+    // Atrasado: score muito alto; mais dias de atraso = mais urgente
+    return 10000 + prio * 1000 + Math.floor((horas - limite) / 24) * 10;
+  }
+  if (horas > limite - 24) return 5000 + prio * 100; // Vence hoje
+  return prio; // OK: apenas ordem por prioridade
+}
+
+// ── Urgência: estado e dias de atraso ────────────────────────
+function _urgenciaInfo(p) {
+  const horas  = horasDesdeData(p.data_atualizacao || p.data_cadastro);
+  const limite = LIMITE_HORAS[p.prioridade] || 336;
+  if (horas > limite) {
+    const dias = Math.ceil((horas - limite) / 24);
+    return { estado: 'atrasado', dias, muitoAtrasado: dias >= 2 };
+  }
+  if (horas > limite - 24) return { estado: 'hoje', dias: 0, muitoAtrasado: false };
+  return { estado: 'ok', dias: 0, muitoAtrasado: false };
+}
 const OLLAMA_URL   = 'http://localhost:11434/api/generate';
 let   OLLAMA_MODEL = localStorage.getItem('ollama_model') || 'llama3.2:3b';
 const BLOCO_MAX    = 49000;
@@ -50,6 +77,10 @@ function _lerRascunhoExtensaoDoHash() {
       const b64   = hash.replace(/^#/, '').replace(/^.*rascunho=/, '');
       const dados = JSON.parse(decodeURIComponent(escape(atob(b64))));
       sessionStorage.setItem('sei_rascunho_extensao', JSON.stringify(dados));
+      // Salva domínio do SEI para usar em abrirNoSEI
+      if (dados.url_sei) {
+        try { const u = new URL(dados.url_sei); localStorage.setItem('sei_base_url', u.origin + '/sei'); } catch(e) {}
+      }
       if (history.replaceState) history.replaceState(null, '', window.location.pathname + window.location.search);
     }
   } catch (e) { /* hash inválido ou ausente */ }
@@ -222,6 +253,11 @@ async function renderDashboard() {
   rgBox.innerHTML = '<div class="resumo-geral-box" style="opacity:.5;"><div class="rg-header"><h3><i class="fa fa-brain" style="color:var(--primary);"></i> Resumo do Período</h3></div><div class="rg-content text-muted"><span class="spinner"></span> Verificando resumo...</div></div>';
   content.appendChild(rgBox);
 
+  const agendaBox = document.createElement('div');
+  agendaBox.id = 'agenda-container';
+  content.appendChild(agendaBox);
+  renderAgendaProcessos(agendaBox);
+
   const filtros = document.createElement('div');
   filtros.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px;';
   filtros.innerHTML = `
@@ -255,21 +291,22 @@ async function renderDashboard() {
 function renderCards(lista, grid) {
   grid.innerHTML = '';
   if (!lista.length) { grid.innerHTML = '<p class="text-muted">Nenhum processo encontrado.</p>'; return; }
-  lista.forEach(p => grid.appendChild(criarCard(p)));
+  // Ordena: atrasados primeiro, depois vence hoje, depois por prioridade
+  const sorted = [...lista].sort((a, b) => _urgenciaScore(b) - _urgenciaScore(a));
+  sorted.forEach(p => grid.appendChild(criarCard(p)));
 }
 
 function criarCard(p) {
   const sei = p.numero_sei;
   const div = document.createElement('div');
   div.className = 'process-card';
-  const horas  = horasDesdeData(p.data_atualizacao || p.data_cadastro);
-  const limite = LIMITE_HORAS[p.prioridade] || 336;
-  const atrasado = horas > limite;
-  // Máxima sempre recebe destaque visual
+  const urg = _urgenciaInfo(p);
+  // Classes visuais
   if (p.prioridade === 'Máxima') div.classList.add('alerta-maxima');
-  else if (atrasado) {
-    if (p.prioridade === 'Alta')  div.classList.add('alerta-alta');
-    else if (p.prioridade === 'Média') div.classList.add('alerta-media');
+  if (urg.estado === 'atrasado') {
+    div.classList.add(urg.muitoAtrasado ? 'alerta-muito-atrasado' : 'alerta-atrasado');
+  } else if (urg.estado === 'hoje' && p.prioridade !== 'Máxima') {
+    div.classList.add('alerta-hoje');
   }
   const priBadge = (p.prioridade || '').replace('á','a').replace('é','e');
   div.innerHTML = `
@@ -287,7 +324,7 @@ function criarCard(p) {
     <div class="card-footer">
       <span class="badge-prioridade ${priBadge}">${p.prioridade}</span>
       <span class="badge-status">${p.status}</span>
-      ${p.prioridade==='Máxima' ? `<span style="color:#7c3aed;font-size:.72rem;font-weight:700;">⚠ URGENTE</span>` : atrasado ? `<span style="color:${p.prioridade==='Alta'?'#dc2626':'#ca8a04'};font-size:.72rem;font-weight:600;">⚠ Atrasado</span>` : ''}
+      ${p.prioridade==='Máxima' ? `<span style="color:#7c3aed;font-size:.72rem;font-weight:700;">⚠ URGENTE</span>` : urg.estado==='atrasado' ? `<span style="color:#dc2626;font-size:.72rem;font-weight:700;">🔴 ATRASADO${urg.dias>0?' '+urg.dias+'d':''}</span>` : urg.estado==='hoje' ? `<span style="color:#2563eb;font-size:.72rem;font-weight:600;">⚡ Verificar hoje</span>` : ''}
     </div>`;
   div.onclick = () => abrirProcesso(sei);
   return div;
@@ -372,6 +409,100 @@ async function renderResumoGeral(container) {
   </div>`;
 }
 
+// ==================== AGENDA DE VERIFICAÇÃO ====================
+function renderAgendaProcessos(container) {
+  const ativos = todosProcessos.filter(p => p.status === 'Em andamento');
+  if (!ativos.length) { container.innerHTML = ''; return; }
+
+  const agora    = Date.now();
+  const hojeInicio = new Date(); hojeInicio.setHours(0,0,0,0);
+  const nomeDias = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+
+  // Calcula data de vencimento de cada processo
+  const buckets = {};
+  ativos.forEach(p => {
+    const horas  = horasDesdeData(p.data_atualizacao || p.data_cadastro);
+    const limite = LIMITE_HORAS[p.prioridade] || 336;
+    const horasRestantes = limite - horas;
+
+    // Data de vencimento: agora + horasRestantes (pode ser no passado = atrasado)
+    let venc = new Date(agora + horasRestantes * 3600000);
+    venc.setHours(0,0,0,0);
+    // Atrasados ficam no dia de hoje
+    if (venc < hojeInicio) venc = new Date(hojeInicio);
+    const key = venc.toISOString().substring(0, 10);
+    if (!buckets[key]) buckets[key] = [];
+    const diasAtraso = horasRestantes < 0 ? Math.ceil(-horasRestantes / 24) : 0;
+    buckets[key].push({ p, diasAtraso });
+  });
+
+  // Gera 8 dias a partir de hoje
+  const dias = [];
+  for (let i = 0; i < 8; i++) {
+    const d = new Date(hojeInicio);
+    d.setDate(d.getDate() + i);
+    dias.push(d);
+  }
+
+  let html = `
+  <div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:16px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <h3 style="margin:0;font-size:.9rem;font-weight:700;color:#111827;"><i class="fa fa-calendar-check" style="color:var(--primary);margin-right:6px;"></i> Agenda de Verificação</h3>
+      <button onclick="this.nextElementSibling.classList.toggle('hidden')" style="background:none;border:1px solid var(--border);border-radius:5px;padding:2px 8px;cursor:pointer;font-size:.72rem;color:var(--muted);">▼ expandir/recolher</button>
+    </div>
+    <div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;">`;
+
+  dias.forEach((dia, idx) => {
+    const key    = dia.toISOString().substring(0, 10);
+    const procs  = buckets[key] || [];
+    const isHoje = idx === 0;
+    const nomeDia = isHoje ? 'Hoje' : nomeDias[dia.getDay()];
+    const diaMes  = dia.getDate() + '/' + (dia.getMonth() + 1);
+    const temAtrasado = procs.some(x => x.diasAtraso > 0);
+    const borderColor = isHoje ? (temAtrasado ? '#dc2626' : '#3b82f6') : (procs.length ? '#d1d5db' : '#e5e7eb');
+    const bgColor     = isHoje ? (temAtrasado ? '#fef2f2' : '#eff6ff') : (procs.length ? '#f9fafb' : '#fafafa');
+    const headerColor = isHoje ? (temAtrasado ? '#dc2626' : '#2563eb') : '#6b7280';
+    const badgeBg     = temAtrasado ? '#dc2626' : isHoje ? '#2563eb' : '#6b7280';
+
+    html += `
+    <div style="min-width:130px;flex:0 0 130px;border:1.5px solid ${borderColor};border-radius:8px;padding:8px;background:${bgColor};">
+      <div style="font-size:.72rem;font-weight:700;color:${headerColor};text-align:center;margin-bottom:6px;white-space:nowrap;">
+        ${nomeDia} <span style="font-weight:400;">${diaMes}</span>
+        ${procs.length ? `<span style="background:${badgeBg};color:#fff;border-radius:10px;padding:1px 6px;font-size:.65rem;margin-left:3px;">${procs.length}</span>` : ''}
+      </div>`;
+
+    if (!procs.length) {
+      html += `<div style="text-align:center;color:#9ca3af;font-size:.68rem;padding:10px 0;"><i class="fa fa-check" style="color:#86efac;"></i> Livre</div>`;
+    } else {
+      // Ordena: mais atrasados primeiro, depois por prioridade
+      procs.sort((a, b) => {
+        if (b.diasAtraso !== a.diasAtraso) return b.diasAtraso - a.diasAtraso;
+        const prioOrd = { 'Máxima': 4, 'Alta': 3, 'Média': 2, 'Baixa': 1 };
+        return (prioOrd[b.p.prioridade] || 0) - (prioOrd[a.p.prioridade] || 0);
+      });
+      procs.slice(0, 4).forEach(({ p, diasAtraso }) => {
+        const priBadge = (p.prioridade||'').replace('á','a').replace('é','e');
+        html += `
+        <div onclick="abrirProcesso('${p.numero_sei}')" style="cursor:pointer;margin-bottom:5px;padding:5px 6px;background:#fff;border:1px solid #e5e7eb;border-radius:5px;font-size:.7rem;">
+          <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.69rem;color:#111;" title="${p.numero_sei}">${p.numero_sei}</div>
+          <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#6b7280;font-size:.67rem;" title="${p.titulo||''}">${(p.titulo||'Sem título').substring(0,28)}</div>
+          <div style="margin-top:3px;display:flex;gap:3px;align-items:center;flex-wrap:wrap;">
+            <span class="badge-prioridade ${priBadge}" style="font-size:.6rem;padding:1px 4px;">${p.prioridade}</span>
+            ${diasAtraso > 0 ? `<span style="color:#dc2626;font-size:.64rem;font-weight:700;">⚠ +${diasAtraso}d</span>` : ''}
+          </div>
+        </div>`;
+      });
+      if (procs.length > 4) {
+        html += `<div style="text-align:center;font-size:.68rem;color:var(--muted);margin-top:3px;">+${procs.length - 4} mais</div>`;
+      }
+    }
+    html += `</div>`;
+  });
+
+  html += `</div></div>`;
+  container.innerHTML = html;
+}
+
 // ==================== PROCESSO DETALHE ====================
 async function abrirProcesso(sei) {
   const content = document.getElementById('content');
@@ -413,10 +544,7 @@ async function abrirProcesso(sei) {
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
         <span class="badge-prioridade ${priBadge}">${proc.prioridade||'—'}</span>
         <span class="badge-status">${proc.status||'—'}</span>
-        ${proc.link_sei
-          ? `<a href="${proc.link_sei}" target="_blank" class="btn btn-secondary btn-sm"><i class="fa fa-external-link-alt"></i> Abrir no SEI</a>
-             <button class="btn btn-secondary btn-sm" onclick="definirLinkSEI('${sei}')" title="Atualizar link" style="padding:4px 8px;"><i class="fa fa-sync-alt"></i></button>`
-          : `<button class="btn btn-secondary btn-sm" onclick="definirLinkSEI('${sei}')"><i class="fa fa-link"></i> Link SEI</button>`}
+        <button class="btn btn-secondary btn-sm" onclick="abrirNoSEI('${sei}','${(proc.url_sei||'').replace(/'/g,'&apos;')}')"><i class="fa fa-external-link-alt"></i> Abrir no SEI</button>
         <button class="btn btn-secondary btn-sm" onclick="editarProcesso('${sei}')" title="Editar processo"><i class="fa fa-edit"></i> Editar</button>
         <button class="btn btn-warning btn-sm" onclick="registrarSemMovimentacao('${sei}')" title="Registrar: sem movimentação"><i class="fa fa-check-circle"></i> Sem Movim.</button>
       </div>
@@ -775,15 +903,19 @@ function buildLinkProcessoEstavel(url) {
   } catch(e) { return url; }
 }
 
-async function definirLinkSEI(sei) {
-  const link = prompt('Cole o link do processo no portal SEI:\n(Copie diretamente do navegador enquanto estiver com o processo aberto)');
-  if (link === null) return;
-  const linkTrimado = link.trim();
-  const linkEstavel = buildLinkProcessoEstavel(linkTrimado);
-  try { const u = new URL(linkTrimado); localStorage.setItem('sei_base_url', u.origin + '/sei'); } catch(e) {}
-  const res = await api('processos/atualizar', { numero_sei: sei, link_sei: linkEstavel });
-  if (res.ok) abrirProcesso(sei);
-  else alert('Erro ao salvar: ' + (res.erro || 'Falha'));
+// Abre o processo no SEI usando a URL de pesquisa rápida (estável para qualquer sessão).
+// urlSei é o url_sei armazenado na exportação — usado apenas para extrair o domínio.
+function abrirNoSEI(sei, urlSei) {
+  let base = localStorage.getItem('sei_base_url');
+  if (!base && urlSei) {
+    try { const u = new URL(urlSei); base = u.origin + '/sei'; localStorage.setItem('sei_base_url', base); } catch(e) {}
+  }
+  if (base) {
+    window.open(base + '/controlador.php?acao=pesquisa_rapida&txtPesquisaRapida=' + encodeURIComponent(sei), '_blank');
+  } else {
+    const d = prompt('Informe o endereço base do SEI (ex: https://sei.pe.gov.br/sei):\n(Necessário apenas na primeira vez — ficará salvo.)');
+    if (d) { localStorage.setItem('sei_base_url', d.trim().replace(/\/+$/, '')); abrirNoSEI(sei, null); }
+  }
 }
 
 // ==================== UPLOAD DOCUMENTOS ====================
