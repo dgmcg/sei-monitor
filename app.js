@@ -3,7 +3,7 @@
 // ============================================================
 
 // ==================== CONFIG ====================
-const LIMITE_HORAS = { 'Máxima': 48, 'Alta': 96, 'Média': 168, 'Baixa': 336 };
+const LIMITE_HORAS = { 'Máxima': 2, 'Alta': 24, 'Média': 48, 'Baixa': 96 };
 
 // ── Urgência: pontuação para ordenação dos cards ─────────────
 function _urgenciaScore(p) {
@@ -239,6 +239,12 @@ async function renderDashboard() {
   todosProcessos = res.processos || [];
   content.innerHTML = '';
 
+  // Barra de estatísticas: totais + média de tramitação por prioridade
+  const statsBox = document.createElement('div');
+  statsBox.id = 'stats-bar';
+  content.appendChild(statsBox);
+  renderStatsBar(statsBox);
+
   // Banner de alerta para processos com prioridade Máxima em andamento
   const urgentes = todosProcessos.filter(p => p.prioridade === 'Máxima' && p.status === 'Em andamento');
   if (urgentes.length) {
@@ -322,7 +328,7 @@ function criarCard(p) {
     ${p.situacao_atual ? `<div class="situacao" style="font-size:.84rem;">${p.situacao_atual}</div>` : ''}
     ${p.ultimo_andamento_resumo ? `<div class="ultimo-and"><i class="fa fa-clock" style="margin-right:4px;color:var(--muted);"></i>${p.ultimo_andamento_resumo}${p.ultimo_andamento_data ? ' <small>('+formatarDataGAS(p.ultimo_andamento_data)+')</small>' : ''}</div>` : ''}
     <div class="card-footer">
-      <span class="badge-prioridade ${priBadge}">${p.prioridade}</span>
+      <span class="badge-prioridade ${priBadge}" onclick="event.stopPropagation();alterarPrioridade('${sei}','${p.prioridade||''}',this)" title="Clique para alterar prioridade" style="cursor:pointer;">${p.prioridade}</span>
       <span class="badge-status">${p.status}</span>
       ${p.prioridade==='Máxima' ? `<span style="color:#7c3aed;font-size:.72rem;font-weight:700;">⚠ URGENTE</span>` : urg.estado==='atrasado' ? `<span style="color:#dc2626;font-size:.72rem;font-weight:700;">🔴 ATRASADO${urg.dias>0?' '+urg.dias+'d':''}</span>` : urg.estado==='hoje' ? `<span style="color:#2563eb;font-size:.72rem;font-weight:600;">⚡ Verificar hoje</span>` : ''}
     </div>`;
@@ -410,6 +416,15 @@ async function renderResumoGeral(container) {
 }
 
 // ==================== AGENDA DE VERIFICAÇÃO ====================
+function toggleDiaAgenda(key, btn) {
+  const el = document.getElementById('dia-extra-' + key);
+  if (!el) return;
+  const hidden = el.style.display === 'none';
+  el.style.display = hidden ? '' : 'none';
+  const count = el.querySelectorAll('[data-dia-item]').length;
+  btn.textContent = hidden ? '▲ Recolher' : '▼ Ver todos (' + count + ')';
+}
+
 function renderAgendaProcessos(container) {
   const ativos = todosProcessos.filter(p => p.status === 'Em andamento');
   if (!ativos.length) { container.innerHTML = ''; return; }
@@ -425,10 +440,8 @@ function renderAgendaProcessos(container) {
     const limite = LIMITE_HORAS[p.prioridade] || 336;
     const horasRestantes = limite - horas;
 
-    // Data de vencimento: agora + horasRestantes (pode ser no passado = atrasado)
     let venc = new Date(agora + horasRestantes * 3600000);
     venc.setHours(0,0,0,0);
-    // Atrasados ficam no dia de hoje
     if (venc < hojeInicio) venc = new Date(hojeInicio);
     const key = venc.toISOString().substring(0, 10);
     if (!buckets[key]) buckets[key] = [];
@@ -444,18 +457,24 @@ function renderAgendaProcessos(container) {
     dias.push(d);
   }
 
+  const ITEMS_VISIVEIS = 3;
+
   let html = `
   <div style="background:#fff;border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:16px;">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+    <div style="margin-bottom:10px;">
       <h3 style="margin:0;font-size:.9rem;font-weight:700;color:#111827;"><i class="fa fa-calendar-check" style="color:var(--primary);margin-right:6px;"></i> Agenda de Verificação</h3>
-      <button onclick="this.nextElementSibling.classList.toggle('hidden')" style="background:none;border:1px solid var(--border);border-radius:5px;padding:2px 8px;cursor:pointer;font-size:.72rem;color:var(--muted);">▼ expandir/recolher</button>
     </div>
     <div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;">`;
 
-  dias.forEach((dia, idx) => {
+  dias.forEach((dia, i) => {
     const key    = dia.toISOString().substring(0, 10);
-    const procs  = buckets[key] || [];
-    const isHoje = idx === 0;
+    const keyId  = key.replace(/-/g,'');
+    const procs  = (buckets[key] || []).slice().sort((a, b) => {
+      if (b.diasAtraso !== a.diasAtraso) return b.diasAtraso - a.diasAtraso;
+      const prioOrd = { 'Máxima': 4, 'Alta': 3, 'Média': 2, 'Baixa': 1 };
+      return (prioOrd[b.p.prioridade] || 0) - (prioOrd[a.p.prioridade] || 0);
+    });
+    const isHoje = i === 0;
     const nomeDia = isHoje ? 'Hoje' : nomeDias[dia.getDay()];
     const diaMes  = dia.getDate() + '/' + (dia.getMonth() + 1);
     const temAtrasado = procs.some(x => x.diasAtraso > 0);
@@ -463,6 +482,21 @@ function renderAgendaProcessos(container) {
     const bgColor     = isHoje ? (temAtrasado ? '#fef2f2' : '#eff6ff') : (procs.length ? '#f9fafb' : '#fafafa');
     const headerColor = isHoje ? (temAtrasado ? '#dc2626' : '#2563eb') : '#6b7280';
     const badgeBg     = temAtrasado ? '#dc2626' : isHoje ? '#2563eb' : '#6b7280';
+
+    const visiveisItems = procs.slice(0, ITEMS_VISIVEIS);
+    const extrasItems   = procs.slice(ITEMS_VISIVEIS);
+
+    function procHtml({ p, diasAtraso }) {
+      const priBadge = (p.prioridade||'').replace('á','a').replace('é','e');
+      return `<div data-dia-item onclick="abrirProcesso('${p.numero_sei}')" style="cursor:pointer;margin-bottom:5px;padding:5px 6px;background:#fff;border:1px solid #e5e7eb;border-radius:5px;font-size:.7rem;">
+        <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.69rem;color:#111;" title="${p.numero_sei}">${p.numero_sei}</div>
+        <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#6b7280;font-size:.67rem;" title="${p.titulo||''}">${(p.titulo||'Sem título').substring(0,28)}</div>
+        <div style="margin-top:3px;display:flex;gap:3px;align-items:center;flex-wrap:wrap;">
+          <span class="badge-prioridade ${priBadge}" style="font-size:.6rem;padding:1px 4px;">${p.prioridade}</span>
+          ${diasAtraso > 0 ? `<span style="color:#dc2626;font-size:.64rem;font-weight:700;">⚠ +${diasAtraso}d</span>` : ''}
+        </div>
+      </div>`;
+    }
 
     html += `
     <div style="min-width:130px;flex:0 0 130px;border:1.5px solid ${borderColor};border-radius:8px;padding:8px;background:${bgColor};">
@@ -474,26 +508,10 @@ function renderAgendaProcessos(container) {
     if (!procs.length) {
       html += `<div style="text-align:center;color:#9ca3af;font-size:.68rem;padding:10px 0;"><i class="fa fa-check" style="color:#86efac;"></i> Livre</div>`;
     } else {
-      // Ordena: mais atrasados primeiro, depois por prioridade
-      procs.sort((a, b) => {
-        if (b.diasAtraso !== a.diasAtraso) return b.diasAtraso - a.diasAtraso;
-        const prioOrd = { 'Máxima': 4, 'Alta': 3, 'Média': 2, 'Baixa': 1 };
-        return (prioOrd[b.p.prioridade] || 0) - (prioOrd[a.p.prioridade] || 0);
-      });
-      procs.slice(0, 4).forEach(({ p, diasAtraso }) => {
-        const priBadge = (p.prioridade||'').replace('á','a').replace('é','e');
-        html += `
-        <div onclick="abrirProcesso('${p.numero_sei}')" style="cursor:pointer;margin-bottom:5px;padding:5px 6px;background:#fff;border:1px solid #e5e7eb;border-radius:5px;font-size:.7rem;">
-          <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.69rem;color:#111;" title="${p.numero_sei}">${p.numero_sei}</div>
-          <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#6b7280;font-size:.67rem;" title="${p.titulo||''}">${(p.titulo||'Sem título').substring(0,28)}</div>
-          <div style="margin-top:3px;display:flex;gap:3px;align-items:center;flex-wrap:wrap;">
-            <span class="badge-prioridade ${priBadge}" style="font-size:.6rem;padding:1px 4px;">${p.prioridade}</span>
-            ${diasAtraso > 0 ? `<span style="color:#dc2626;font-size:.64rem;font-weight:700;">⚠ +${diasAtraso}d</span>` : ''}
-          </div>
-        </div>`;
-      });
-      if (procs.length > 4) {
-        html += `<div style="text-align:center;font-size:.68rem;color:var(--muted);margin-top:3px;">+${procs.length - 4} mais</div>`;
+      html += visiveisItems.map(procHtml).join('');
+      if (extrasItems.length > 0) {
+        html += `<div id="dia-extra-${keyId}" style="display:none;">${extrasItems.map(procHtml).join('')}</div>`;
+        html += `<button onclick="event.stopPropagation();toggleDiaAgenda('${keyId}',this)" style="width:100%;background:none;border:1px solid #e5e7eb;border-radius:4px;padding:3px;cursor:pointer;font-size:.65rem;color:var(--muted);margin-top:2px;">▼ Ver todos (${procs.length})</button>`;
       }
     }
     html += `</div>`;
@@ -501,6 +519,103 @@ function renderAgendaProcessos(container) {
 
   html += `</div></div>`;
   container.innerHTML = html;
+}
+
+// ==================== STATS BAR ====================
+function renderStatsBar(container) {
+  const ativos = todosProcessos.filter(p => p.status === 'Em andamento');
+  if (!ativos.length) { container.innerHTML = ''; return; }
+
+  const prioridades = ['Máxima', 'Alta', 'Média', 'Baixa'];
+  const coresPrio = { 'Máxima': '#7c3aed', 'Alta': '#dc2626', 'Média': '#ca8a04', 'Baixa': '#16a34a' };
+
+  function avgDias(grupo) {
+    if (!grupo.length) return 0;
+    const total = grupo.reduce((s, p) => {
+      const criado = new Date(p.data_cadastro || p.data_atualizacao);
+      const dias = isNaN(criado.getTime()) ? 0 : (Date.now() - criado.getTime()) / 86400000;
+      return s + dias;
+    }, 0);
+    return Math.round(total / grupo.length);
+  }
+
+  let html = `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;align-items:stretch;">`;
+
+  html += `<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 14px;display:flex;align-items:center;gap:10px;min-width:120px;">
+    <i class="fa fa-tasks" style="color:#2563eb;font-size:1.1rem;"></i>
+    <div>
+      <div style="font-size:1.4rem;font-weight:700;color:#1e40af;line-height:1;">${ativos.length}</div>
+      <div style="font-size:.65rem;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;">Em andamento</div>
+    </div>
+  </div>`;
+
+  prioridades.forEach(pri => {
+    const grupo = ativos.filter(p => p.prioridade === pri);
+    if (!grupo.length) return;
+    const avg = avgDias(grupo);
+    const priBadge = pri.replace('á','a').replace('é','e');
+    const cor = coresPrio[pri];
+    html += `<div style="background:#fff;border:1px solid ${cor}55;border-radius:8px;padding:8px 14px;cursor:pointer;min-width:110px;" onclick="filtrarPorPrioridade('${pri}')">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
+        <span class="badge-prioridade ${priBadge}" style="font-size:.65rem;padding:2px 6px;pointer-events:none;">${pri}</span>
+        <span style="font-size:1.2rem;font-weight:700;color:${cor};line-height:1;">${grupo.length}</span>
+      </div>
+      <div style="font-size:.65rem;color:#6b7280;">ø ${avg} dias tramitação</div>
+    </div>`;
+  });
+
+  html += `</div>`;
+  container.innerHTML = html;
+}
+
+// ==================== ALTERAR PRIORIDADE INLINE ====================
+async function alterarPrioridade(sei, prioridadeAtual, elemento) {
+  document.querySelectorAll('.prio-dropdown').forEach(el => el.remove());
+
+  const prioridades = ['Máxima', 'Alta', 'Média', 'Baixa'];
+  const dropdown = document.createElement('div');
+  dropdown.className = 'prio-dropdown';
+
+  prioridades.forEach(p => {
+    const item = document.createElement('div');
+    item.className = 'prio-dropdown-item';
+    if (p === prioridadeAtual) item.style.background = '#f3f4f6';
+    const priBadge = p.replace('á','a').replace('é','e');
+    item.innerHTML = `<span class="badge-prioridade ${priBadge}" style="font-size:.68rem;padding:2px 7px;pointer-events:none;">${p}</span>`;
+    item.onclick = async (e) => {
+      e.stopPropagation();
+      dropdown.remove();
+      if (p === prioridadeAtual) return;
+      const res = await api('processos/atualizar', { numero_sei: sei, prioridade: p });
+      if (res.ok) {
+        const proc = todosProcessos.find(x => x.numero_sei === sei);
+        if (proc) proc.prioridade = p;
+        const newBadge = p.replace('á','a').replace('é','e');
+        elemento.className = 'badge-prioridade ' + newBadge;
+        elemento.textContent = p;
+        const sb = document.getElementById('stats-bar');
+        if (sb) renderStatsBar(sb);
+        const ag = document.getElementById('agenda-container');
+        if (ag) renderAgendaProcessos(ag);
+        const grid = document.getElementById('cards-grid');
+        if (grid) aplicarFiltros();
+      } else {
+        alert('Erro: ' + (res.erro || 'Tente novamente'));
+      }
+    };
+    dropdown.appendChild(item);
+  });
+
+  const rect = elemento.getBoundingClientRect();
+  dropdown.style.cssText = `position:fixed;top:${rect.bottom + 4}px;left:${rect.left}px;z-index:9999;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.15);padding:6px;min-width:120px;`;
+  document.body.appendChild(dropdown);
+
+  setTimeout(() => {
+    const close = (e) => {
+      if (!dropdown.contains(e.target)) { dropdown.remove(); document.removeEventListener('click', close); }
+    };
+    document.addEventListener('click', close);
+  }, 0);
 }
 
 // ==================== PROCESSO DETALHE ====================
@@ -542,7 +657,7 @@ async function abrirProcesso(sei) {
         <h2 style="font-size:1.15rem;margin:0;line-height:1.3;">${proc.titulo}</h2>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
-        <span class="badge-prioridade ${priBadge}">${proc.prioridade||'—'}</span>
+        <span class="badge-prioridade ${priBadge}" onclick="event.stopPropagation();alterarPrioridade('${sei}','${proc.prioridade||''}',this)" title="Clique para alterar prioridade" style="cursor:pointer;">${proc.prioridade||'—'}</span>
         <span class="badge-status">${proc.status||'—'}</span>
         <button class="btn btn-secondary btn-sm" onclick="abrirNoSEI('${sei}','${(proc.url_sei||'').replace(/'/g,'&apos;')}')"><i class="fa fa-external-link-alt"></i> Abrir no SEI</button>
         <button class="btn btn-secondary btn-sm" onclick="editarProcesso('${sei}')" title="Editar processo"><i class="fa fa-edit"></i> Editar</button>
