@@ -416,28 +416,94 @@ async function renderResumoGeral(container) {
 }
 
 // ==================== AGENDA DE VERIFICAÇÃO ====================
-function toggleDiaAgenda(key, btn) {
-  const el = document.getElementById('dia-extra-' + key);
-  if (!el) return;
-  const hidden = el.style.display === 'none';
-  el.style.display = hidden ? '' : 'none';
-  const count = el.querySelectorAll('[data-dia-item]').length;
-  btn.textContent = hidden ? '▲ Recolher' : '▼ Ver todos (' + count + ')';
+// Armazena os buckets do calendário para uso no modal de dia
+let _agendaBuckets = {};
+let _agendaNomeDias = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+
+function abrirDiaAgenda(keyId) {
+  const key   = keyId.replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3');
+  const procs = (_agendaBuckets[key] || []).slice().sort((a, b) => {
+    if (b.diasAtraso !== a.diasAtraso) return b.diasAtraso - a.diasAtraso;
+    const prioOrd = { 'Máxima': 4, 'Alta': 3, 'Média': 2, 'Baixa': 1 };
+    return (prioOrd[b.p.prioridade] || 0) - (prioOrd[a.p.prioridade] || 0);
+  });
+  if (!procs.length) return;
+
+  const data    = new Date(key + 'T12:00:00');
+  const nomeDia = _agendaNomeDias[data.getDay()];
+  const diaMes  = data.getDate() + '/' + (data.getMonth() + 1) + '/' + data.getFullYear();
+  const temAtraso = procs.some(x => x.diasAtraso > 0);
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.style.cssText = 'max-width:640px;max-height:85vh;display:flex;flex-direction:column;';
+
+  const headerBg = temAtraso ? '#fef2f2' : '#eff6ff';
+  const headerCor = temAtraso ? '#dc2626' : '#1e40af';
+
+  modal.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding:12px 16px;background:${headerBg};border-radius:8px;">
+      <div>
+        <div style="font-size:1.15rem;font-weight:700;color:${headerCor};">
+          <i class="fa fa-calendar-day" style="margin-right:8px;"></i>${nomeDia}, ${diaMes}
+        </div>
+        <div style="font-size:.78rem;color:#6b7280;margin-top:2px;">${procs.length} processo(s) a verificar${temAtraso ? ' — <span style="color:#dc2626;font-weight:600;">com atrasos</span>' : ''}</div>
+      </div>
+      <button onclick="this.closest('.modal-overlay').remove()" style="background:none;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:.85rem;padding:4px 10px;color:var(--muted);">✕ Fechar</button>
+    </div>
+    <div id="dia-modal-lista" style="overflow-y:auto;flex:1;padding-right:4px;"></div>`;
+
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+
+  const lista = modal.querySelector('#dia-modal-lista');
+  procs.forEach(({ p, diasAtraso }) => {
+    const priBadge = (p.prioridade||'').replace('á','a').replace('é','e');
+    const urg      = _urgenciaInfo(p);
+    const div      = document.createElement('div');
+    div.style.cssText = 'padding:14px;border:1px solid var(--border);border-radius:8px;margin-bottom:10px;cursor:pointer;transition:background .15s;';
+    if (urg.muitoAtrasado) div.style.borderColor = '#991b1b';
+    else if (urg.estado === 'atrasado') div.style.borderColor = '#dc2626';
+    div.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:8px;">
+        <div style="min-width:0;">
+          <div style="font-size:.72rem;color:var(--muted);font-weight:600;margin-bottom:2px;">SEI: ${p.numero_sei}</div>
+          <div style="font-weight:600;font-size:.95rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${p.titulo||'Sem título'}</div>
+        </div>
+        <div style="display:flex;gap:5px;align-items:center;flex-shrink:0;">
+          <span class="badge-prioridade ${priBadge}" style="pointer-events:none;">${p.prioridade}</span>
+          ${diasAtraso > 0 ? `<span style="background:#dc2626;color:#fff;border-radius:20px;font-size:.68rem;font-weight:700;padding:2px 8px;">⚠ +${diasAtraso}d</span>` : ''}
+        </div>
+      </div>
+      ${p.situacao_atual ? `<div style="font-size:.82rem;color:#374151;background:#f9fafb;border-radius:5px;padding:6px 10px;border-left:3px solid var(--primary);margin-bottom:8px;">${p.situacao_atual}</div>` : ''}
+      <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:.77rem;color:var(--muted);">
+        ${p.unidade ? `<span><i class="fa fa-building"></i> ${p.unidade}</span>` : ''}
+        ${p.status   ? `<span><i class="fa fa-circle" style="font-size:.6rem;color:${p.status==='Em andamento'?'#16a34a':'#6b7280'};"></i> ${p.status}</span>` : ''}
+        ${p.data_atualizacao ? `<span><i class="fa fa-clock"></i> ${formatarDataSeguro(p.data_atualizacao)}</span>` : ''}
+      </div>`;
+    div.onclick = () => { overlay.remove(); abrirProcesso(p.numero_sei); };
+    div.onmouseenter = () => div.style.background = '#f9fafb';
+    div.onmouseleave = () => div.style.background = '';
+    lista.appendChild(div);
+  });
 }
 
 function renderAgendaProcessos(container) {
   const ativos = todosProcessos.filter(p => p.status === 'Em andamento');
   if (!ativos.length) { container.innerHTML = ''; return; }
 
-  const agora    = Date.now();
+  const agora      = Date.now();
   const hojeInicio = new Date(); hojeInicio.setHours(0,0,0,0);
-  const nomeDias = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
 
   // Calcula data de vencimento de cada processo
   const buckets = {};
   ativos.forEach(p => {
-    const horas  = horasDesdeData(p.data_atualizacao || p.data_cadastro);
-    const limite = LIMITE_HORAS[p.prioridade] || 336;
+    const horas         = horasDesdeData(p.data_atualizacao || p.data_cadastro);
+    const limite        = LIMITE_HORAS[p.prioridade] || 336;
     const horasRestantes = limite - horas;
 
     let venc = new Date(agora + horasRestantes * 3600000);
@@ -448,6 +514,8 @@ function renderAgendaProcessos(container) {
     const diasAtraso = horasRestantes < 0 ? Math.ceil(-horasRestantes / 24) : 0;
     buckets[key].push({ p, diasAtraso });
   });
+
+  _agendaBuckets = buckets; // expõe globalmente para o modal
 
   // Gera 8 dias a partir de hoje
   const dias = [];
@@ -474,21 +542,18 @@ function renderAgendaProcessos(container) {
       const prioOrd = { 'Máxima': 4, 'Alta': 3, 'Média': 2, 'Baixa': 1 };
       return (prioOrd[b.p.prioridade] || 0) - (prioOrd[a.p.prioridade] || 0);
     });
-    const isHoje = i === 0;
-    const nomeDia = isHoje ? 'Hoje' : nomeDias[dia.getDay()];
-    const diaMes  = dia.getDate() + '/' + (dia.getMonth() + 1);
+    const isHoje      = i === 0;
+    const nomeDia     = isHoje ? 'Hoje' : _agendaNomeDias[dia.getDay()];
+    const diaMes      = dia.getDate() + '/' + (dia.getMonth() + 1);
     const temAtrasado = procs.some(x => x.diasAtraso > 0);
     const borderColor = isHoje ? (temAtrasado ? '#dc2626' : '#3b82f6') : (procs.length ? '#d1d5db' : '#e5e7eb');
     const bgColor     = isHoje ? (temAtrasado ? '#fef2f2' : '#eff6ff') : (procs.length ? '#f9fafb' : '#fafafa');
     const headerColor = isHoje ? (temAtrasado ? '#dc2626' : '#2563eb') : '#6b7280';
     const badgeBg     = temAtrasado ? '#dc2626' : isHoje ? '#2563eb' : '#6b7280';
 
-    const visiveisItems = procs.slice(0, ITEMS_VISIVEIS);
-    const extrasItems   = procs.slice(ITEMS_VISIVEIS);
-
-    function procHtml({ p, diasAtraso }) {
+    function procMiniHtml({ p, diasAtraso }) {
       const priBadge = (p.prioridade||'').replace('á','a').replace('é','e');
-      return `<div data-dia-item onclick="abrirProcesso('${p.numero_sei}')" style="cursor:pointer;margin-bottom:5px;padding:5px 6px;background:#fff;border:1px solid #e5e7eb;border-radius:5px;font-size:.7rem;">
+      return `<div onclick="abrirProcesso('${p.numero_sei}')" style="cursor:pointer;margin-bottom:5px;padding:5px 6px;background:#fff;border:1px solid #e5e7eb;border-radius:5px;">
         <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.69rem;color:#111;" title="${p.numero_sei}">${p.numero_sei}</div>
         <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#6b7280;font-size:.67rem;" title="${p.titulo||''}">${(p.titulo||'Sem título').substring(0,28)}</div>
         <div style="margin-top:3px;display:flex;gap:3px;align-items:center;flex-wrap:wrap;">
@@ -499,20 +564,23 @@ function renderAgendaProcessos(container) {
     }
 
     html += `
-    <div style="min-width:130px;flex:0 0 130px;border:1.5px solid ${borderColor};border-radius:8px;padding:8px;background:${bgColor};">
+    <div style="min-width:130px;flex:0 0 130px;border:1.5px solid ${borderColor};border-radius:8px;padding:8px;background:${bgColor};display:flex;flex-direction:column;">
       <div style="font-size:.72rem;font-weight:700;color:${headerColor};text-align:center;margin-bottom:6px;white-space:nowrap;">
         ${nomeDia} <span style="font-weight:400;">${diaMes}</span>
         ${procs.length ? `<span style="background:${badgeBg};color:#fff;border-radius:10px;padding:1px 6px;font-size:.65rem;margin-left:3px;">${procs.length}</span>` : ''}
       </div>`;
 
     if (!procs.length) {
-      html += `<div style="text-align:center;color:#9ca3af;font-size:.68rem;padding:10px 0;"><i class="fa fa-check" style="color:#86efac;"></i> Livre</div>`;
+      html += `<div style="text-align:center;color:#9ca3af;font-size:.68rem;padding:10px 0;flex:1;"><i class="fa fa-check" style="color:#86efac;"></i> Livre</div>`;
     } else {
-      html += visiveisItems.map(procHtml).join('');
-      if (extrasItems.length > 0) {
-        html += `<div id="dia-extra-${keyId}" style="display:none;">${extrasItems.map(procHtml).join('')}</div>`;
-        html += `<button onclick="event.stopPropagation();toggleDiaAgenda('${keyId}',this)" style="width:100%;background:none;border:1px solid #e5e7eb;border-radius:4px;padding:3px;cursor:pointer;font-size:.65rem;color:var(--muted);margin-top:2px;">▼ Ver todos (${procs.length})</button>`;
+      html += procs.slice(0, ITEMS_VISIVEIS).map(procMiniHtml).join('');
+      if (procs.length > ITEMS_VISIVEIS) {
+        html += `<div style="text-align:center;font-size:.65rem;color:var(--muted);padding:2px 0;">+${procs.length - ITEMS_VISIVEIS} mais</div>`;
       }
+      // Botão expandir (sempre visível quando há processos)
+      html += `<button onclick="event.stopPropagation();abrirDiaAgenda('${keyId}')" style="margin-top:auto;padding-top:6px;width:100%;background:none;border:none;border-top:1px solid ${borderColor};padding:4px 0 0;cursor:pointer;font-size:.66rem;color:${headerColor};font-weight:600;">
+        <i class="fa fa-expand-alt" style="font-size:.6rem;margin-right:3px;"></i>Ver dia completo
+      </button>`;
     }
     html += `</div>`;
   });
@@ -529,11 +597,14 @@ function renderStatsBar(container) {
   const prioridades = ['Máxima', 'Alta', 'Média', 'Baixa'];
   const coresPrio = { 'Máxima': '#7c3aed', 'Alta': '#dc2626', 'Média': '#ca8a04', 'Baixa': '#16a34a' };
 
-  function avgDias(grupo) {
+  // Usa data_inicio_processo (data mais antiga nos andamentos, calculada pelo backend).
+  // Fallback para data_cadastro caso ainda não tenha sido preenchida.
+  function avgDiasTramitacao(grupo) {
     if (!grupo.length) return 0;
     const total = grupo.reduce((s, p) => {
-      const criado = new Date(p.data_cadastro || p.data_atualizacao);
-      const dias = isNaN(criado.getTime()) ? 0 : (Date.now() - criado.getTime()) / 86400000;
+      const dataRef = p.data_inicio_processo || p.data_cadastro || p.data_atualizacao;
+      const inicio  = new Date(dataRef);
+      const dias    = isNaN(inicio.getTime()) ? 0 : (Date.now() - inicio.getTime()) / 86400000;
       return s + dias;
     }, 0);
     return Math.round(total / grupo.length);
@@ -552,7 +623,7 @@ function renderStatsBar(container) {
   prioridades.forEach(pri => {
     const grupo = ativos.filter(p => p.prioridade === pri);
     if (!grupo.length) return;
-    const avg = avgDias(grupo);
+    const avg = avgDiasTramitacao(grupo);
     const priBadge = pri.replace('á','a').replace('é','e');
     const cor = coresPrio[pri];
     html += `<div style="background:#fff;border:1px solid ${cor}55;border-radius:8px;padding:8px 14px;cursor:pointer;min-width:110px;" onclick="filtrarPorPrioridade('${pri}')">
