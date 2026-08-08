@@ -33,7 +33,8 @@ body{font-family:'Segoe UI',sans-serif;background:var(--bg);color:var(--text);di
 #content{flex:1;overflow-y:auto;overflow-x:hidden;padding:24px;min-width:0;}
 
 /* CARDS */
-.cards-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;margin-top:16px;}
+.cards-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;margin-top:16px;width:100%;min-width:0;}
+.cards-grid > *{min-width:0;}
 .process-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;position:relative;cursor:pointer;transition:box-shadow .2s,transform .2s;}
 .process-card:hover{box-shadow:0 4px 16px rgba(0,0,0,.1);transform:translateY(-2px);}
 .process-card .sei-num{font-size:.75rem;color:var(--muted);font-weight:600;letter-spacing:.5px;}
@@ -122,11 +123,11 @@ body{font-family:'Segoe UI',sans-serif;background:var(--bg);color:var(--text);di
 .dropzone i{font-size:2rem;margin-bottom:8px;display:block;}
 
 /* RESUMO GERAL */
-.resumo-geral-box{background:#fff;border:1px solid var(--border);border-radius:10px;padding:18px;margin-bottom:20px;}
-.resumo-geral-box .rg-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
+.resumo-geral-box{background:#fff;border:1px solid var(--border);border-radius:10px;padding:18px;margin-bottom:20px;max-width:100%;overflow:hidden;}
+.resumo-geral-box .rg-header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px;margin-bottom:12px;}
 .resumo-geral-box .rg-header h3{font-size:.95rem;font-weight:600;display:flex;align-items:center;gap:8px;}
 .resumo-geral-box .rg-meta{font-size:.75rem;color:var(--muted);}
-.resumo-geral-box .rg-content{font-size:.87rem;color:#374151;line-height:1.6;white-space:pre-wrap;}
+.resumo-geral-box .rg-content{font-size:.87rem;color:#374151;line-height:1.6;white-space:pre-wrap;word-break:break-word;overflow-wrap:break-word;max-width:100%;}
 
 /* CHAT FLUTUANTE */
 #chat-fab{position:fixed;bottom:24px;right:24px;z-index:900;}
