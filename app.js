@@ -1248,10 +1248,9 @@ async function extrairPDF(buf) {
     }
     return texto;
   }
-  const decoder = new TextDecoder('latin1');
-  const text    = decoder.decode(buf);
-  const matches = text.match(/\(([^\)]{2,})\)/g) || [];
-  return matches.map(m => m.slice(1,-1)).join(' ');
+  // pdf.js não disponível — retorna vazio para evitar salvar lixo binário
+  console.warn('pdf.js não carregado. Extração de PDF não disponível.');
+  return '';
 }
 
 function dividirEmBlocos(texto, maxChars) {
