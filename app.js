@@ -274,6 +274,10 @@ async function renderDashboard() {
     <select onchange="filtrarPorPrioridade(this.value)" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:.78rem;">
       <option value="">Todas prioridades</option>
       <option>Máxima</option><option>Alta</option><option>Média</option><option>Baixa</option>
+    </select>
+    <select id="filtro-tipo-sel" onchange="filtrarPorTipo(this.value)" style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:.78rem;">
+      <option value="">Todos os tipos</option>
+      ${[...new Set(todosProcessos.map(p => p.tipo).filter(Boolean))].sort().map(t => `<option>${t}</option>`).join('')}
     </select>`;
   content.appendChild(filtros);
 
@@ -349,14 +353,16 @@ async function deletarProcessoCard(event, sei) {
   }
 }
 
-let filtroStatus = '', filtroPrioridade = '', filtroTexto = '';
+let filtroStatus = '', filtroPrioridade = '', filtroTipo = '', filtroTexto = '';
 function filtrarPorStatus(s)    { filtroStatus     = s; aplicarFiltros(); }
 function filtrarPorPrioridade(s){ filtroPrioridade = s; aplicarFiltros(); }
+function filtrarPorTipo(s)      { filtroTipo       = s; const sel = document.getElementById('filtro-tipo-sel'); if (sel) sel.value = s; aplicarFiltros(); }
 function filtrarCards()         { filtroTexto = document.getElementById('search-input').value.toLowerCase(); aplicarFiltros(); }
 function aplicarFiltros() {
   let lista = todosProcessos;
   if (filtroStatus)     lista = lista.filter(p => p.status === filtroStatus);
   if (filtroPrioridade) lista = lista.filter(p => p.prioridade === filtroPrioridade);
+  if (filtroTipo)       lista = lista.filter(p => p.tipo === filtroTipo);
   if (filtroTexto)      lista = lista.filter(p => (p.numero_sei+p.titulo+p.situacao_atual+'').toLowerCase().includes(filtroTexto));
   renderCards(lista, document.getElementById('cards-grid'));
 }
@@ -634,6 +640,22 @@ function renderStatsBar(container) {
       <div style="font-size:.65rem;color:#6b7280;">ø ${avg} dias tramitação</div>
     </div>`;
   });
+
+  // Chips por tipo
+  const tipos = [...new Set(ativos.map(p => p.tipo).filter(Boolean))].sort();
+  if (tipos.length > 0) {
+    html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">
+      <span style="font-size:.65rem;font-weight:700;text-transform:uppercase;color:var(--muted);letter-spacing:.5px;white-space:nowrap;">Tipo</span>`;
+    tipos.forEach(tipo => {
+      const count = ativos.filter(p => p.tipo === tipo).length;
+      html += `<div style="background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:6px 12px;cursor:pointer;display:flex;align-items:center;gap:6px;" onclick="filtrarPorTipo('${tipo.replace(/'/g,"\\'")}')">
+        <span style="font-size:.78rem;font-weight:600;color:var(--text);">${tipo}</span>
+        <span style="font-size:1rem;font-weight:700;color:var(--primary);line-height:1;">${count}</span>
+      </div>`;
+    });
+    html += `<div style="background:#f8fafc;border:1px dashed var(--border);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:.78rem;color:var(--muted);" onclick="filtrarPorTipo('')">✕ limpar</div>`;
+    html += `</div>`;
+  }
 
   html += `</div>`;
   container.innerHTML = html;
