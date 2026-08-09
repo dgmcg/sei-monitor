@@ -1386,17 +1386,25 @@ function filtrarBlocos(blocos, keywords, maxChars) {
 
 // ==================== DADOS FIXOS ====================
 let _tipos = [], _unidades = [];
+const _TIPOS_PADRAO = ['Contrato','Convênio','Aditivo','Ata de Registro','Autorização','Outro'];
+
 async function carregarDadosFixos() {
   const [resT, resU] = await Promise.all([
     api('dados-fixos/listar?categoria=tipo'),
     api('dados-fixos/listar?categoria=unidade')
   ]);
-  _tipos    = (resT.itens || []).map(i => i.valor);
+  _tipos = (resT.itens || []).map(i => i.valor);
+
+  // Se não há tipos cadastrados, semeia os padrões automaticamente no backend
+  if (!_tipos.length) {
+    await Promise.all(_TIPOS_PADRAO.map(t => api('dados-fixos/criar', { categoria: 'tipo', valor: t })));
+    _tipos = [..._TIPOS_PADRAO];
+  }
   _unidades = resU.itens || [];
 }
 
 function optsTipos(sel) {
-  const opcoes = _tipos.length ? _tipos : ['Contrato','Convênio','Aditivo','Ata de Registro','Autorização','Outro'];
+  const opcoes = _tipos.length ? _tipos : _TIPOS_PADRAO;
   return opcoes.map(t => `<option ${sel===t?'selected':''}>${t}</option>`).join('');
 }
 function optsUnidades(sel) {
