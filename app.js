@@ -832,15 +832,25 @@ async function abrirProcesso(sei) {
       <button class="btn btn-primary btn-sm" onclick="mostrarUpload('${sei}')"><i class="fa fa-upload"></i> Importar Documentos</button>
     </div>
     ${documentos.length ? documentos.map(d => `
-      <div class="doc-item">
-        <i class="${iconDoc(d.nome_arquivo)}"></i>
-        <div style="flex:1;">
-          <div class="doc-name">${d.nome_arquivo}</div>
-          <div class="doc-meta">${formatarDataSeguro(d.data_upload)} — ${d.usuario_upload||''} — ${d.tamanho ? formatarTamanho(d.tamanho) : 'texto extraído'}</div>
+      <div class="doc-item" style="flex-direction:column;align-items:stretch;gap:0;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <i class="${iconDoc(d.nome_arquivo)}"></i>
+          <div style="flex:1;">
+            <div class="doc-name">${d.nome_arquivo}</div>
+            <div class="doc-meta">${formatarDataSeguro(d.data_upload)} — ${d.usuario_upload||''} — ${d.tamanho ? formatarTamanho(d.tamanho) : 'texto extraído'}</div>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;flex-shrink:0;">
+            <button class="btn btn-secondary btn-sm" title="Ver texto extraído"
+              onclick="toggleTextoDoc('${sei}','${d.id}','${(d.nome_arquivo||'').replace(/'/g,"\\'")}',this)"
+              id="btn-txt-${d.id}">
+              <i class="fa fa-align-left"></i> Texto
+            </button>
+            ${d.link_verificacao
+              ? `<a href="${d.link_verificacao}" target="_blank" class="btn btn-secondary btn-sm" title="Verificar no SEI"><i class="fa fa-check-circle"></i> SEI</a>`
+              : d.link_sei ? `<a href="${d.link_sei}" target="_blank" class="btn btn-secondary btn-sm"><i class="fa fa-external-link-alt"></i></a>` : ''}
+          </div>
         </div>
-        ${d.link_verificacao
-          ? `<a href="${d.link_verificacao}" target="_blank" class="btn btn-secondary btn-sm" title="Verificar no SEI"><i class="fa fa-check-circle"></i> SEI</a>`
-          : d.link_sei ? `<a href="${d.link_sei}" target="_blank" class="btn btn-secondary btn-sm"><i class="fa fa-external-link-alt"></i></a>` : ''}
+        <div id="txt-doc-${d.id}" style="display:none;margin-top:10px;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:.78rem;color:var(--text);white-space:pre-wrap;max-height:300px;overflow-y:auto;line-height:1.5;"></div>
       </div>`).join('') : '<p class="text-muted">Nenhum documento importado.</p>'}
   </div>
 
@@ -1303,16 +1313,24 @@ async function acionarIA(sei) {
     ? similares.map(s => `SEI ${s.numero_sei}: ${s.titulo} — Status: ${s.status} — ${s.situacao_atual || s.resumo_ia || 'sem análise'}`).join('\n')
     : '';
 
-  // Filtrar conteúdo mais relevante
-  const keywords = [proc.titulo||'', proc.tipo||'', sei, 'contrato','prazo','pagamento','execução','saúde','OSS']
-    .join(' ').toLowerCase().split(/\s+/).filter(k => k.length > 3);
+  // Filtrar conteúdo mais relevante — inclui unidade/OSS nas keywords para melhor relevância
+  const keywords = [
+    proc.titulo||'', proc.tipo||'', proc.unidade||'', proc.oss||'', sei,
+    'contrato','prazo','pagamento','execução','saúde','regulação','OSS'
+  ].join(' ').toLowerCase().split(/\s+/).filter(k => k.length > 3);
   const conteudoFiltrado     = filtrarBlocos(blocos, keywords, RELEVANCIA_MAX_CHARS);
   const basesLegaisFiltradas = filtrarBlocos(basesLegais, keywords, 12000);
+
+  // Aviso se não há documentos indexados
+  if (!conteudoFiltrado) {
+    console.warn('[IA] Nenhum conteúdo de documento disponível para o processo', sei,
+      '— a análise pode ser menos precisa.');
+  }
 
   const prompt = `Você é um ESPECIALISTA em gestão de contratos, processos administrativos e regulação de Organizações Sociais de Saúde (OSS) no setor público brasileiro.
 Possui profundo conhecimento em: Lei 9.637/98 (OS), contratos de gestão, licitações na saúde, fiscalização contratual, metas assistenciais e normativas do SUS.
 
-ANALISE o processo abaixo com visão gerencial estratégica:
+⚠️ INSTRUÇÃO CRÍTICA: Baseie sua análise EXCLUSIVAMENTE nas informações fornecidas neste prompt (andamentos, documentos e anotações abaixo). NÃO use conhecimento externo nem invente informações. Se um dado não estiver no contexto fornecido, escreva "não identificado nos documentos". Nomes de unidades, valores, datas e responsáveis devem vir SOMENTE do texto abaixo.
 
 === PROCESSO SEI ${sei} ===
 TÍTULO: ${proc.titulo||''}
@@ -1328,7 +1346,9 @@ ${andamentos || 'Nenhum andamento registrado.'}
 ANOTAÇÕES DE GESTÃO:
 ${anotacoes || 'Nenhuma anotação.'}
 
-${conteudoFiltrado ? '=== CONTEÚDO DOS DOCUMENTOS ===\n' + conteudoFiltrado : ''}
+${conteudoFiltrado
+  ? '=== CONTEÚDO DOS DOCUMENTOS (USE APENAS ESTAS INFORMAÇÕES) ===\n' + conteudoFiltrado
+  : '=== DOCUMENTOS: Nenhum documento indexado para este processo. Baseie-se apenas nos andamentos acima. ==='}
 
 ${basesLegaisFiltradas ? '=== BASES LEGAIS APLICÁVEIS ===\n' + basesLegaisFiltradas : ''}
 
@@ -1337,11 +1357,11 @@ ${similaresTxt ? '=== PROCESSOS SEMELHANTES NO SISTEMA ===\n' + similaresTxt : '
 Responda EXATAMENTE neste formato JSON (sem markdown, sem texto fora do JSON):
 {
   "categoria": "categoria do processo em 3-5 palavras",
-  "situacao_atual": "situação atual e status do processo em 1-2 frases objetivas",
-  "resumo": "análise gerencial detalhada incluindo contexto, histórico e situação atual (mín. 3 parágrafos)",
-  "apontamentos": "pontos críticos, riscos contratuais, prazos importantes e alertas legais",
-  "sugestoes": "sugestões práticas de ação baseadas nas bases legais aplicáveis e boas práticas de gestão de OSS",
-  "proximos_passos": "próximos passos concretos e priorizados com responsáveis e prazos sugeridos",
+  "situacao_atual": "situação atual e status do processo em 1-2 frases objetivas, citando apenas informações dos documentos acima",
+  "resumo": "análise gerencial detalhada incluindo contexto, histórico e situação atual (mín. 3 parágrafos), baseada exclusivamente nos documentos fornecidos",
+  "apontamentos": "pontos críticos, riscos e alertas identificados nos documentos",
+  "sugestoes": "sugestões práticas baseadas nas informações dos documentos e bases legais aplicáveis",
+  "proximos_passos": "próximos passos concretos com responsáveis e prazos, inferidos dos documentos",
   "processos_similares": "${similaresTxt ? 'comparação com os processos semelhantes: como foram conduzidos, lições aprendidas e benchmarks aplicáveis' : 'sem processos semelhantes identificados no sistema'}"
 }`;
 
@@ -1381,6 +1401,49 @@ function filtrarBlocos(blocos, keywords, maxChars) {
     resultado += b + '\n---\n';
   }
   return resultado;
+}
+
+// ==================== TEXTO EXTRAÍDO DE DOCUMENTO ====================
+// Cache para não rebuscar a cada toggle
+const _cacheTextoDoc = {};
+
+async function toggleTextoDoc(sei, docId, docNome, btn) {
+  const el = document.getElementById('txt-doc-' + docId);
+  if (!el) return;
+
+  // Já aberto → fechar
+  if (el.style.display !== 'none') {
+    el.style.display = 'none';
+    btn.innerHTML = '<i class="fa fa-align-left"></i> Texto';
+    return;
+  }
+
+  // Abrir: busca blocos se ainda não estiver em cache
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa fa-spinner fa-spin"></i>';
+
+  if (!_cacheTextoDoc[docId]) {
+    try {
+      const res = await api('conteudo/listar?sei=' + sei);
+      const blocos = (res.blocos || []).filter(b => b.documento_id === docId);
+      _cacheTextoDoc[docId] = blocos.length
+        ? blocos.sort((a, b) => a.bloco_num - b.bloco_num).map(b => b.conteudo).join('\n\n')
+        : null;
+    } catch(e) {
+      _cacheTextoDoc[docId] = null;
+    }
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = '<i class="fa fa-align-left"></i> Fechar';
+
+  if (_cacheTextoDoc[docId]) {
+    el.textContent = _cacheTextoDoc[docId];
+    el.style.display = 'block';
+  } else {
+    el.textContent = '⚠️ Nenhum texto extraído para este documento.';
+    el.style.display = 'block';
+  }
 }
 
 // ==================== DADOS FIXOS ====================
