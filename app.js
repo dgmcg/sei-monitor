@@ -1210,10 +1210,13 @@ async function processarArquivos(files, sei) {
       if (texto && texto.trim().length > 0) {
         updateProgItem(prog, file.name, 'proc', 'Salvando texto...');
         await salvarBlocosSheets(sei, resReg.doc_id, file.name, texto);
+        // Gera mini-resumo do documento (não bloqueia se falhar)
+        updateProgItem(prog, file.name, 'proc', 'Gerando resumo IA...');
+        try { await gerarResumoDocumento(sei, resReg.doc_id, file.name, texto); } catch(e) { /* silencioso */ }
       }
 
       api('log/registrar', { acao: 'IMPORTAR_DOCUMENTO', numero_sei: sei, detalhes: file.name });
-      updateProgItem(prog, file.name, 'ok', texto ? 'Importado — texto extraído' : 'Importado — sem texto');
+      updateProgItem(prog, file.name, 'ok', texto ? 'Importado — texto e resumo gerados' : 'Importado — sem texto');
     } catch(e) { updateProgItem(prog, file.name, 'err', 'Erro: ' + e.message); }
   }
 
@@ -1280,12 +1283,49 @@ async function salvarBlocosSheets(sei, docId, docNome, texto) {
   }
 }
 
-// ==================== IA ANÁLISE COMPLETA ====================
+// ==================== RESUMO POR DOCUMENTO ====================
+async function gerarResumoDocumento(sei, docId, docNome, textoCompleto) {
+  const ollamaOk = await testarOllama();
+  if (!ollamaOk) return;
+
+  // Usa os primeiros 8000 chars — suficiente para identificar assunto, decisões e datas
+  const amostra = textoCompleto.substring(0, 8000);
+
+  const prompt = `Você é um assistente de gestão de processos administrativos públicos.
+Leia o trecho do documento abaixo e gere um resumo CURTO (máximo 400 caracteres) contendo:
+- Tipo/assunto do documento
+- Principais decisões ou informações registradas
+- Datas, valores ou responsáveis relevantes mencionados
+
+Responda APENAS com o texto do resumo, sem prefixos nem explicações.
+
+DOCUMENTO: ${docNome}
+CONTEÚDO:
+${amostra}`;
+
+  try {
+    const resp = await fetch(OLLAMA_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: OLLAMA_MODEL, prompt, stream: false })
+    });
+    const data    = await resp.json();
+    const resumo  = (data.response || '').trim().substring(0, 500);
+    if (resumo) {
+      await api('documentos/salvar-resumo', { doc_id: docId, resumo_doc: resumo });
+    }
+  } catch(e) {
+    console.warn('Erro ao gerar resumo do documento:', docNome, e);
+  }
+}
+
+// ==================== IA ANÁLISE COMPLETA (2 fases) ====================
 async function acionarIA(sei) {
   const ollamaOk = await testarOllama(); if (!ollamaOk) return;
 
-  // Carrega todos os dados em paralelo
-  const [resConteudo, resBases, resP, resA, resAnot, resSim] = await Promise.all([
+  // ── Carrega dados em paralelo ────────────────────────────────────────
+  const [resDocs, resConteudo, resBases, resP, resA, resAnot, resSim] = await Promise.all([
+    api('documentos/listar?sei=' + sei),
     api('conteudo/listar?sei=' + sei),
     api('bases-legais/listar'),
     api('processos/obter?sei=' + sei),
@@ -1294,9 +1334,10 @@ async function acionarIA(sei) {
     api('processos/similares?sei=' + sei)
   ]);
 
-  const proc       = resP.processo || {};
-  const blocos     = (resConteudo.blocos || []).map(b => b.conteudo || '');
-  const basesLegais = (resBases.blocos || []).map(b => b.conteudo || '');
+  const proc      = resP.processo || {};
+  const docs      = resDocs.documentos || [];
+  const todosBloc = resConteudo.blocos || [];  // [{documento_id, bloco_num, conteudo}]
+
   const andamentos = (resA.andamentos || []).slice(-10).map(a =>
     `${formatarDataGAS(a.data_movimento)} ${formatarHoraGAS(a.hora_movimento)}: ${a.descricao||''}`
   ).join('\n');
@@ -1304,33 +1345,95 @@ async function acionarIA(sei) {
     `${formatarDataHora(a.data_hora)}: ${a.texto||''}`
   ).join('\n');
 
-  // Processos similares (por categoria OU por tipo)
   let similares = resSim.processos || [];
   if (!similares.length && proc.tipo) {
     similares = todosProcessos.filter(p => p.numero_sei !== sei && p.tipo === proc.tipo).slice(0, 3);
   }
   const similaresTxt = similares.length
-    ? similares.map(s => `SEI ${s.numero_sei}: ${s.titulo} — Status: ${s.status} — ${s.situacao_atual || s.resumo_ia || 'sem análise'}`).join('\n')
+    ? similares.map(s => `SEI ${s.numero_sei}: ${s.titulo} — ${s.situacao_atual || s.resumo_ia || 'sem análise'}`).join('\n')
     : '';
 
-  // Filtrar conteúdo mais relevante — inclui unidade/OSS nas keywords para melhor relevância
+  const basesLegais = (resBases.blocos || []).map(b => b.conteudo || '');
   const keywords = [
     proc.titulo||'', proc.tipo||'', proc.unidade||'', proc.oss||'', sei,
     'contrato','prazo','pagamento','execução','saúde','regulação','OSS'
   ].join(' ').toLowerCase().split(/\s+/).filter(k => k.length > 3);
-  const conteudoFiltrado     = filtrarBlocos(blocos, keywords, RELEVANCIA_MAX_CHARS);
   const basesLegaisFiltradas = filtrarBlocos(basesLegais, keywords, 12000);
 
-  // Aviso se não há documentos indexados
-  if (!conteudoFiltrado) {
-    console.warn('[IA] Nenhum conteúdo de documento disponível para o processo', sei,
-      '— a análise pode ser menos precisa.');
+  // ── FASE 1: resumos de todos os documentos ───────────────────────────
+  // Usa resumo_doc salvo (gerado na importação) ou os primeiros 300 chars do texto
+  const resumosPorDoc = docs.map(d => {
+    const resumoSalvo = (d.resumo_doc || '').trim();
+    if (resumoSalvo) return { id: d.id, nome: d.nome_arquivo, resumo: resumoSalvo };
+
+    // Fallback: primeiros 300 chars dos blocos deste documento
+    const blocoDoc = todosBloc
+      .filter(b => b.documento_id === d.id)
+      .sort((a, b2) => a.bloco_num - b2.bloco_num);
+    const trecho = blocoDoc.map(b => b.conteudo || '').join(' ').substring(0, 300);
+    return { id: d.id, nome: d.nome_arquivo, resumo: trecho || '(sem texto extraído)' };
+  });
+
+  const resumosTxt = resumosPorDoc
+    .map((r, i) => `[${i+1}] ${r.nome}\n${r.resumo}`)
+    .join('\n\n');
+
+  // ── FASE 1: IA seleciona documentos mais relevantes ─────────────────
+  let docsRelevantesIds = [];
+  if (resumosPorDoc.length > 0 && ollamaOk) {
+    const promptSelecao = `Você é assistente de gestão de processos públicos.
+
+Processo: ${proc.titulo||sei} (${proc.tipo||''}, ${proc.unidade||''})
+
+Abaixo estão resumos de ${resumosPorDoc.length} documentos do processo.
+Identifique os 5 documentos MÁS RELEVANTES para uma análise gerencial completa.
+Considere: decisões recentes, valores, prazos, riscos e documentos técnicos.
+
+${resumosTxt}
+
+Responda APENAS com os números entre colchetes dos documentos selecionados, separados por vírgula.
+Exemplo: 1,3,5,7,9`;
+
+    try {
+      const rSel  = await fetch(OLLAMA_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ model: OLLAMA_MODEL, prompt: promptSelecao, stream: false }) });
+      const dSel  = await rSel.json();
+      const nums  = (dSel.response || '').match(/\d+/g) || [];
+      docsRelevantesIds = nums
+        .map(n => parseInt(n) - 1)
+        .filter(i => i >= 0 && i < resumosPorDoc.length)
+        .slice(0, 5)
+        .map(i => resumosPorDoc[i].id);
+    } catch(e) {
+      console.warn('[IA Fase 1] Falha na seleção, usando todos os docs:', e);
+    }
   }
 
+  // Se a seleção falhou, usa todos (fallback seguro)
+  if (!docsRelevantesIds.length) {
+    docsRelevantesIds = resumosPorDoc.slice(0, 5).map(r => r.id);
+  }
+
+  // ── FASE 2: texto integral dos docs selecionados ─────────────────────
+  const textoIntegral = docsRelevantesIds.map(docId => {
+    const blocos = todosBloc
+      .filter(b => b.documento_id === docId)
+      .sort((a, b2) => a.bloco_num - b2.bloco_num)
+      .map(b => b.conteudo || '');
+    const nomeDoc = (docs.find(d => d.id === docId) || {}).nome_arquivo || docId;
+    const texto = filtrarBlocos(blocos, keywords, Math.floor(RELEVANCIA_MAX_CHARS / Math.max(docsRelevantesIds.length, 1)));
+    return texto ? `--- ${nomeDoc} ---\n${texto}` : '';
+  }).filter(Boolean).join('\n\n');
+
+  // Aviso de contexto
+  if (!textoIntegral && !resumosTxt) {
+    console.warn('[IA] Nenhum conteúdo de documento disponível para o processo', sei);
+  }
+
+  // ── FASE 2: análise final ─────────────────────────────────────────────
   const prompt = `Você é um ESPECIALISTA em gestão de contratos, processos administrativos e regulação de Organizações Sociais de Saúde (OSS) no setor público brasileiro.
 Possui profundo conhecimento em: Lei 9.637/98 (OS), contratos de gestão, licitações na saúde, fiscalização contratual, metas assistenciais e normativas do SUS.
 
-⚠️ INSTRUÇÃO CRÍTICA: Baseie sua análise EXCLUSIVAMENTE nas informações fornecidas neste prompt (andamentos, documentos e anotações abaixo). NÃO use conhecimento externo nem invente informações. Se um dado não estiver no contexto fornecido, escreva "não identificado nos documentos". Nomes de unidades, valores, datas e responsáveis devem vir SOMENTE do texto abaixo.
+⚠️ INSTRUÇÃO CRÍTICA: Baseie sua análise EXCLUSIVAMENTE nas informações fornecidas neste prompt. NÃO use conhecimento externo nem invente informações. Nomes de unidades, valores, datas e responsáveis devem vir SOMENTE do texto abaixo.
 
 === PROCESSO SEI ${sei} ===
 TÍTULO: ${proc.titulo||''}
@@ -1346,9 +1449,11 @@ ${andamentos || 'Nenhum andamento registrado.'}
 ANOTAÇÕES DE GESTÃO:
 ${anotacoes || 'Nenhuma anotação.'}
 
-${conteudoFiltrado
-  ? '=== CONTEÚDO DOS DOCUMENTOS (USE APENAS ESTAS INFORMAÇÕES) ===\n' + conteudoFiltrado
-  : '=== DOCUMENTOS: Nenhum documento indexado para este processo. Baseie-se apenas nos andamentos acima. ==='}
+=== VISÃO GERAL DOS DOCUMENTOS DO PROCESSO (${resumosPorDoc.length} documentos) ===
+${resumosTxt || 'Nenhum documento com resumo disponível.'}
+
+=== CONTEÚDO INTEGRAL DOS DOCUMENTOS MAIS RELEVANTES ===
+${textoIntegral || 'Texto integral não disponível. Use apenas os resumos acima.'}
 
 ${basesLegaisFiltradas ? '=== BASES LEGAIS APLICÁVEIS ===\n' + basesLegaisFiltradas : ''}
 
@@ -1357,12 +1462,12 @@ ${similaresTxt ? '=== PROCESSOS SEMELHANTES NO SISTEMA ===\n' + similaresTxt : '
 Responda EXATAMENTE neste formato JSON (sem markdown, sem texto fora do JSON):
 {
   "categoria": "categoria do processo em 3-5 palavras",
-  "situacao_atual": "situação atual e status do processo em 1-2 frases objetivas, citando apenas informações dos documentos acima",
-  "resumo": "análise gerencial detalhada incluindo contexto, histórico e situação atual (mín. 3 parágrafos), baseada exclusivamente nos documentos fornecidos",
+  "situacao_atual": "situação atual em 1-2 frases objetivas, citando apenas fatos dos documentos acima",
+  "resumo": "análise gerencial detalhada com contexto, histórico e situação atual (mín. 3 parágrafos), baseada exclusivamente nos documentos fornecidos",
   "apontamentos": "pontos críticos, riscos e alertas identificados nos documentos",
-  "sugestoes": "sugestões práticas baseadas nas informações dos documentos e bases legais aplicáveis",
+  "sugestoes": "sugestões práticas baseadas nos documentos e bases legais aplicáveis",
   "proximos_passos": "próximos passos concretos com responsáveis e prazos, inferidos dos documentos",
-  "processos_similares": "${similaresTxt ? 'comparação com os processos semelhantes: como foram conduzidos, lições aprendidas e benchmarks aplicáveis' : 'sem processos semelhantes identificados no sistema'}"
+  "processos_similares": "${similaresTxt ? 'comparação com os processos semelhantes listados acima' : 'sem processos semelhantes identificados no sistema'}"
 }`;
 
   try {
@@ -1375,16 +1480,16 @@ Responda EXATAMENTE neste formato JSON (sem markdown, sem texto fora do JSON):
     if (!ia) ia = { categoria:'Análise', situacao_atual:'', resumo:raw, apontamentos:'', sugestoes:'', proximos_passos:'', processos_similares:'' };
 
     await api('processos/salvar-ia', {
-      numero_sei:          sei,
-      categoria:           ia.categoria           || '',
-      situacao_atual:      ia.situacao_atual       || '',
-      resumo_ia:           ia.resumo               || '',
-      apontamentos_ia:     ia.apontamentos         || '',
-      sugestoes_ia:        ia.sugestoes            || '',
-      proximos_passos_ia:  ia.proximos_passos      || '',
-      processos_similares_ref: ia.processos_similares || ''
+      numero_sei:              sei,
+      categoria:               ia.categoria             || '',
+      situacao_atual:          ia.situacao_atual         || '',
+      resumo_ia:               ia.resumo                 || '',
+      apontamentos_ia:         ia.apontamentos           || '',
+      sugestoes_ia:            ia.sugestoes              || '',
+      proximos_passos_ia:      ia.proximos_passos        || '',
+      processos_similares_ref: ia.processos_similares    || ''
     });
-    api('log/registrar', { acao:'ANALISE_IA', numero_sei:sei, detalhes:'Análise completa concluída' });
+    api('log/registrar', { acao:'ANALISE_IA', numero_sei:sei, detalhes:`Análise 2 fases — ${resumosPorDoc.length} docs, ${docsRelevantesIds.length} selecionados` });
   } catch(e) { console.warn('Erro na análise IA:', e); }
 }
 
@@ -1426,11 +1531,31 @@ async function toggleTextoDoc(sei, docId, docNome, btn) {
 
   if (!_cacheTextoDoc[docId]) {
     try {
-      const res = await api('conteudo/listar?sei=' + sei);
-      const blocos = (res.blocos || []).filter(b => b.documento_id === docId);
-      _cacheTextoDoc[docId] = blocos.length
+      // Busca blocos de texto e metadados do documento (que tem resumo_doc)
+      const [resBloc, resDocs] = await Promise.all([
+        api('conteudo/listar?sei=' + sei),
+        api('documentos/listar?sei=' + sei)
+      ]);
+      const blocos = (resBloc.blocos || []).filter(b => b.documento_id === docId);
+      const docMeta = (resDocs.documentos || []).find(d => d.id === docId) || {};
+      const resumoDoc = (docMeta.resumo_doc || '').trim();
+      const textoBloc = blocos.length
         ? blocos.sort((a, b) => a.bloco_num - b.bloco_num).map(b => b.conteudo).join('\n\n')
         : null;
+
+      // Monta HTML com resumo em destaque + texto completo
+      let html = '';
+      if (resumoDoc) {
+        html += `<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:8px 12px;margin-bottom:10px;">
+          <div style="font-size:.72rem;font-weight:700;color:#1d4ed8;margin-bottom:4px;letter-spacing:.03em;">📋 RESUMO IA</div>
+          <div style="font-size:.8rem;color:#1e3a5f;line-height:1.5;">${resumoDoc}</div>
+        </div>`;
+      }
+      if (textoBloc) {
+        html += `<div style="font-size:.75rem;font-weight:600;color:var(--muted);margin-bottom:4px;">TEXTO EXTRAÍDO</div>
+        <pre style="white-space:pre-wrap;font-size:.75rem;color:var(--text);line-height:1.5;margin:0;">${textoBloc.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre>`;
+      }
+      _cacheTextoDoc[docId] = html || null;
     } catch(e) {
       _cacheTextoDoc[docId] = null;
     }
@@ -1440,10 +1565,10 @@ async function toggleTextoDoc(sei, docId, docNome, btn) {
   btn.innerHTML = '<i class="fa fa-align-left"></i> Fechar';
 
   if (_cacheTextoDoc[docId]) {
-    el.textContent = _cacheTextoDoc[docId];
+    el.innerHTML = _cacheTextoDoc[docId];
     el.style.display = 'block';
   } else {
-    el.textContent = '⚠️ Nenhum texto extraído para este documento.';
+    el.innerHTML = '<em style="color:var(--muted);">⚠️ Nenhum texto extraído para este documento.</em>';
     el.style.display = 'block';
   }
 }
