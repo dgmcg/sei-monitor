@@ -34,7 +34,7 @@ function _urgenciaInfo(p) {
 const OLLAMA_URL   = 'http://localhost:11434/api/generate';
 let   OLLAMA_MODEL = localStorage.getItem('ollama_model') || 'llama3.2:3b';
 const BLOCO_MAX    = 49000;
-const RELEVANCIA_MAX_CHARS = 25000;
+const RELEVANCIA_MAX_CHARS = 60000;
 
 // ==================== STATE ====================
 let API_URL        = '';
@@ -1397,8 +1397,10 @@ function filtrarBlocos(blocos, keywords, maxChars) {
   }).sort((a, b2) => b2.score - a.score);
   let resultado = '';
   for (const { b } of pontuados) {
-    if (resultado.length + b.length > maxChars) break;
-    resultado += b + '\n---\n';
+    if (resultado.length >= maxChars) break;
+    // Trunca o bloco para caber no espaço restante (blocos podem ser maiores que maxChars)
+    const espaco = maxChars - resultado.length;
+    resultado += b.substring(0, espaco) + '\n---\n';
   }
   return resultado;
 }
