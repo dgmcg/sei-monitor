@@ -830,7 +830,9 @@ async function abrirProcesso(sei) {
   <div id="tab-documentos" class="hidden">
     <div class="flex gap-2" style="margin-bottom:12px;">
       <button class="btn btn-primary btn-sm" onclick="mostrarUpload('${sei}')"><i class="fa fa-upload"></i> Importar Documentos</button>
+      <button class="btn btn-secondary btn-sm" id="btn-gerar-resumos" onclick="gerarResumosDocumentos('${sei}')"><i class="fa fa-brain"></i> Gerar resumos IA</button>
     </div>
+    <div id="resumos-status"></div>
     ${documentos.length ? documentos.map(d => `
       <div class="doc-item" style="flex-direction:column;align-items:stretch;gap:0;">
         <div style="display:flex;align-items:center;gap:10px;">
@@ -1207,11 +1209,12 @@ async function processarArquivos(files, sei) {
       });
       if (!resReg.ok) { updateProgItem(prog, file.name, 'err', resReg.erro || 'Falha ao registrar'); continue; }
 
+      let resumoGerado = false; // declarado FORA do if para ficar acessível abaixo
+
       if (texto && texto.trim().length > 0) {
         updateProgItem(prog, file.name, 'proc', 'Salvando texto...');
         await salvarBlocosSheets(sei, resReg.doc_id, file.name, texto);
         // Gera mini-resumo do documento via Ollama
-        let resumoGerado = false;
         const ollamaDisp = await testarOllama();
         if (ollamaDisp) {
           updateProgItem(prog, file.name, 'proc', 'Gerando resumo IA...');
@@ -1220,17 +1223,18 @@ async function processarArquivos(files, sei) {
             resumoGerado = true;
           } catch(e) {
             console.warn('[resumo_doc] Erro em', file.name, e.message);
-            // Mostra erro específico se for coluna faltando
             if (e.message && e.message.includes('resumo_doc')) {
               updateProgItem(prog, file.name, 'proc', '⚠️ Coluna resumo_doc ausente — execute inicializarPlanilhas() no GAS');
             }
           }
+        } else {
+          console.warn('[resumo_doc] Ollama inativo durante importação de', file.name);
         }
       }
 
       api('log/registrar', { acao: 'IMPORTAR_DOCUMENTO', numero_sei: sei, detalhes: file.name });
       updateProgItem(prog, file.name, 'ok', texto
-        ? (resumoGerado ? 'Importado — texto + resumo IA' : 'Importado — texto extraído (resumo pendente)')
+        ? (resumoGerado ? 'Importado — texto + resumo IA ✓' : 'Importado — texto extraído (sem resumo IA)')
         : 'Importado — sem texto extraível');
     } catch(e) { updateProgItem(prog, file.name, 'err', 'Erro: ' + e.message); }
   }
@@ -1296,6 +1300,65 @@ async function salvarBlocosSheets(sei, docId, docNome, texto) {
       bloco_num: i + 1, total_blocos: blocos.length, conteudo: blocos[i]
     });
   }
+}
+
+// ==================== GERAR RESUMOS PARA DOCS EXISTENTES ====================
+async function gerarResumosDocumentos(sei) {
+  const btn    = document.getElementById('btn-gerar-resumos');
+  const status = document.getElementById('resumos-status');
+  if (!btn || !status) return;
+
+  const ollamaOk = await testarOllama();
+  if (!ollamaOk) {
+    status.innerHTML = '<div class="alert alert-warning" style="font-size:.82rem;">⚠️ Ollama não está ativo. Verifique se está rodando em localhost:11434.</div>';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Gerando...';
+
+  const [resDocs, resConteudo] = await Promise.all([
+    api('documentos/listar?sei=' + sei),
+    api('conteudo/listar?sei=' + sei)
+  ]);
+
+  const docs    = resDocs.documentos || [];
+  const blocos  = resConteudo.blocos || [];
+  const semResumo = docs.filter(d => !(d.resumo_doc || '').trim());
+
+  if (!semResumo.length) {
+    status.innerHTML = '<div class="alert alert-success" style="font-size:.82rem;">✅ Todos os documentos já têm resumo IA.</div>';
+    btn.disabled = false; btn.innerHTML = '<i class="fa fa-brain"></i> Gerar resumos IA';
+    return;
+  }
+
+  status.innerHTML = `<div class="alert alert-info" style="font-size:.82rem;"><span class="spinner"></span> Gerando resumos para ${semResumo.length} documento(s)...</div>`;
+
+  let ok = 0, erro = 0;
+  for (const doc of semResumo) {
+    const blocsDoc = blocos
+      .filter(b => b.documento_id === doc.id)
+      .sort((a, b) => a.bloco_num - b.bloco_num);
+    const texto = blocsDoc.map(b => b.conteudo || '').join('\n');
+    if (!texto.trim()) { erro++; continue; }
+    try {
+      await gerarResumoDocumento(sei, doc.id, doc.nome_arquivo, texto);
+      ok++;
+    } catch(e) {
+      console.warn('[gerarResumosDocumentos] Falha em', doc.nome_arquivo, e.message);
+      erro++;
+    }
+  }
+
+  status.innerHTML = `<div class="alert ${erro ? 'alert-warning' : 'alert-success'}" style="font-size:.82rem;">
+    ✅ ${ok} resumo(s) gerado(s)${erro ? ` · ⚠️ ${erro} sem texto indexado` : ''}.
+    ${ok ? ' Clique em "Atualizar Análise IA" para usar os novos resumos.' : ''}
+  </div>`;
+  btn.disabled = false;
+  btn.innerHTML = '<i class="fa fa-brain"></i> Gerar resumos IA';
+
+  // Limpa cache do painel de expansão para mostrar novos resumos
+  Object.keys(_cacheTextoDoc).forEach(k => delete _cacheTextoDoc[k]);
 }
 
 // ==================== RESUMO POR DOCUMENTO ====================
