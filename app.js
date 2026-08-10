@@ -1210,9 +1210,19 @@ async function processarArquivos(files, sei) {
       if (texto && texto.trim().length > 0) {
         updateProgItem(prog, file.name, 'proc', 'Salvando texto...');
         await salvarBlocosSheets(sei, resReg.doc_id, file.name, texto);
-        // Gera mini-resumo do documento (não bloqueia se falhar)
-        updateProgItem(prog, file.name, 'proc', 'Gerando resumo IA...');
-        try { await gerarResumoDocumento(sei, resReg.doc_id, file.name, texto); } catch(e) { /* silencioso */ }
+        // Gera mini-resumo do documento via Ollama
+        const ollamaDisp = await testarOllama();
+        if (ollamaDisp) {
+          updateProgItem(prog, file.name, 'proc', 'Gerando resumo IA...');
+          try {
+            await gerarResumoDocumento(sei, resReg.doc_id, file.name, texto);
+          } catch(e) {
+            console.warn('[resumo_doc] Erro em', file.name, e);
+            updateProgItem(prog, file.name, 'proc', 'Texto salvo (resumo falhou: ' + e.message + ')');
+          }
+        } else {
+          updateProgItem(prog, file.name, 'proc', 'Texto salvo (Ollama inativo — resumo não gerado)');
+        }
       }
 
       api('log/registrar', { acao: 'IMPORTAR_DOCUMENTO', numero_sei: sei, detalhes: file.name });
@@ -1312,10 +1322,14 @@ ${amostra}`;
     const data    = await resp.json();
     const resumo  = (data.response || '').trim().substring(0, 500);
     if (resumo) {
-      await api('documentos/salvar-resumo', { doc_id: docId, resumo_doc: resumo });
+      const resSalvo = await api('documentos/salvar-resumo', { doc_id: docId, resumo_doc: resumo });
+      if (!resSalvo.sucesso) {
+        throw new Error(resSalvo.erro || 'Falha ao salvar resumo no Sheets');
+      }
     }
   } catch(e) {
     console.warn('Erro ao gerar resumo do documento:', docNome, e);
+    throw e; // repropaga para o caller mostrar o erro na tela
   }
 }
 
