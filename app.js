@@ -1211,22 +1211,27 @@ async function processarArquivos(files, sei) {
         updateProgItem(prog, file.name, 'proc', 'Salvando texto...');
         await salvarBlocosSheets(sei, resReg.doc_id, file.name, texto);
         // Gera mini-resumo do documento via Ollama
+        let resumoGerado = false;
         const ollamaDisp = await testarOllama();
         if (ollamaDisp) {
           updateProgItem(prog, file.name, 'proc', 'Gerando resumo IA...');
           try {
             await gerarResumoDocumento(sei, resReg.doc_id, file.name, texto);
+            resumoGerado = true;
           } catch(e) {
-            console.warn('[resumo_doc] Erro em', file.name, e);
-            updateProgItem(prog, file.name, 'proc', 'Texto salvo (resumo falhou: ' + e.message + ')');
+            console.warn('[resumo_doc] Erro em', file.name, e.message);
+            // Mostra erro específico se for coluna faltando
+            if (e.message && e.message.includes('resumo_doc')) {
+              updateProgItem(prog, file.name, 'proc', '⚠️ Coluna resumo_doc ausente — execute inicializarPlanilhas() no GAS');
+            }
           }
-        } else {
-          updateProgItem(prog, file.name, 'proc', 'Texto salvo (Ollama inativo — resumo não gerado)');
         }
       }
 
       api('log/registrar', { acao: 'IMPORTAR_DOCUMENTO', numero_sei: sei, detalhes: file.name });
-      updateProgItem(prog, file.name, 'ok', texto ? 'Importado — texto e resumo gerados' : 'Importado — sem texto');
+      updateProgItem(prog, file.name, 'ok', texto
+        ? (resumoGerado ? 'Importado — texto + resumo IA' : 'Importado — texto extraído (resumo pendente)')
+        : 'Importado — sem texto extraível');
     } catch(e) { updateProgItem(prog, file.name, 'err', 'Erro: ' + e.message); }
   }
 
@@ -1380,11 +1385,11 @@ async function acionarIA(sei) {
     const resumoSalvo = (d.resumo_doc || '').trim();
     if (resumoSalvo) return { id: d.id, nome: d.nome_arquivo, resumo: resumoSalvo };
 
-    // Fallback: primeiros 300 chars dos blocos deste documento
+    // Fallback: primeiros 1500 chars dos blocos deste documento
     const blocoDoc = todosBloc
       .filter(b => b.documento_id === d.id)
       .sort((a, b2) => a.bloco_num - b2.bloco_num);
-    const trecho = blocoDoc.map(b => b.conteudo || '').join(' ').substring(0, 300);
+    const trecho = blocoDoc.map(b => b.conteudo || '').join('\n').substring(0, 1500).trim();
     return { id: d.id, nome: d.nome_arquivo, resumo: trecho || '(sem texto extraído)' };
   });
 
@@ -1439,15 +1444,15 @@ Exemplo: 1,3,5,7,9`;
   }).filter(Boolean).join('\n\n');
 
   // Aviso de contexto
-  if (!textoIntegral && !resumosTxt) {
+  const temConteudo = !!(textoIntegral || resumosTxt);
+  if (!temConteudo) {
     console.warn('[IA] Nenhum conteúdo de documento disponível para o processo', sei);
   }
 
   // ── FASE 2: análise final ─────────────────────────────────────────────
   const prompt = `Você é um ESPECIALISTA em gestão de contratos, processos administrativos e regulação de Organizações Sociais de Saúde (OSS) no setor público brasileiro.
-Possui profundo conhecimento em: Lei 9.637/98 (OS), contratos de gestão, licitações na saúde, fiscalização contratual, metas assistenciais e normativas do SUS.
 
-⚠️ INSTRUÇÃO CRÍTICA: Baseie sua análise EXCLUSIVAMENTE nas informações fornecidas neste prompt. NÃO use conhecimento externo nem invente informações. Nomes de unidades, valores, datas e responsáveis devem vir SOMENTE do texto abaixo.
+⚠️ INSTRUÇÃO CRÍTICA: Baseie sua análise EXCLUSIVAMENTE nos dados do processo e nos documentos fornecidos abaixo. NÃO use conhecimento externo nem invente informações. Nomes de unidades, valores, datas e responsáveis devem vir SOMENTE do texto fornecido.
 
 === PROCESSO SEI ${sei} ===
 TÍTULO: ${proc.titulo||''}
@@ -1463,13 +1468,13 @@ ${andamentos || 'Nenhum andamento registrado.'}
 ANOTAÇÕES DE GESTÃO:
 ${anotacoes || 'Nenhuma anotação.'}
 
-=== VISÃO GERAL DOS DOCUMENTOS DO PROCESSO (${resumosPorDoc.length} documentos) ===
-${resumosTxt || 'Nenhum documento com resumo disponível.'}
+=== DOCUMENTOS DO PROCESSO (${resumosPorDoc.length} documentos) ===
+${resumosTxt || 'Nenhum documento disponível.'}
 
-=== CONTEÚDO INTEGRAL DOS DOCUMENTOS MAIS RELEVANTES ===
-${textoIntegral || 'Texto integral não disponível. Use apenas os resumos acima.'}
+=== CONTEÚDO DOS DOCUMENTOS MAIS RELEVANTES ===
+${textoIntegral || 'Não disponível — use apenas os resumos e andamentos acima.'}
 
-${basesLegaisFiltradas ? '=== BASES LEGAIS APLICÁVEIS ===\n' + basesLegaisFiltradas : ''}
+${temConteudo && basesLegaisFiltradas ? '=== BASES LEGAIS DE REFERÊNCIA (use apenas se aplicável aos documentos acima) ===\n' + basesLegaisFiltradas : ''}
 
 ${similaresTxt ? '=== PROCESSOS SEMELHANTES NO SISTEMA ===\n' + similaresTxt : ''}
 
