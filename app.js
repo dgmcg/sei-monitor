@@ -898,16 +898,126 @@ async function abrirProcesso(sei) {
 }
 
 // ==================== ANÁLISE IA BOX ====================
+
+/** Converte string ou JSON-array em lista HTML de itens */
+function _iaLista(valor, corItem) {
+  if (!valor) return '';
+  // Tenta parsear como array JSON
+  let itens = null;
+  const trimado = valor.trim();
+  if (trimado.startsWith('[')) {
+    try { itens = JSON.parse(trimado); } catch { itens = null; }
+  }
+  if (itens && Array.isArray(itens) && itens.length) {
+    return '<ul style="margin:8px 0 0 0;padding-left:0;list-style:none;">' +
+      itens.map(it => `<li style="display:flex;gap:8px;margin-bottom:8px;align-items:flex-start;">
+        <span style="color:${corItem};flex-shrink:0;margin-top:2px;">▸</span>
+        <span>${it}</span></li>`).join('') +
+      '</ul>';
+  }
+  // Texto simples: divide por nova linha ou ponto-e-vírgula
+  const linhas = trimado.split(/\n|;\s*/).map(l => l.trim()).filter(Boolean);
+  if (linhas.length > 1) {
+    return '<ul style="margin:8px 0 0 0;padding-left:0;list-style:none;">' +
+      linhas.map(l => `<li style="display:flex;gap:8px;margin-bottom:8px;align-items:flex-start;">
+        <span style="color:${corItem};flex-shrink:0;margin-top:2px;">▸</span>
+        <span>${l}</span></li>`).join('') +
+      '</ul>';
+  }
+  return `<p style="margin:8px 0 0 0;line-height:1.6;">${trimado}</p>`;
+}
+
+/** Detecta se o valor é um JSON bruto de análise (parse malsucedido que vazou) */
+function _iaValorLimpo(valor) {
+  if (!valor) return '';
+  const t = valor.trim();
+  // Se começa com { e contém "categoria" → JSON bruto vazado; extrai campo "resumo"
+  if (t.startsWith('{') && t.includes('"categoria"')) {
+    try {
+      const obj = JSON.parse(t);
+      return obj.resumo || obj.situacao_atual || t;
+    } catch { return t; }
+  }
+  return t;
+}
+
 function renderIABox(proc) {
-  return `<div class="ia-box">
-    <h4><i class="fa fa-brain"></i> Análise de IA — ${proc.categoria||'Processo'}</h4>
-    ${proc.situacao_atual ? `<div class="ia-section"><h5>Situação Atual</h5><p>${proc.situacao_atual}</p></div>` : ''}
-    ${proc.resumo_ia ? `<div class="ia-section"><h5>Resumo Gerencial</h5><p>${proc.resumo_ia}</p></div>` : ''}
-    ${proc.apontamentos_ia ? `<div class="ia-section"><h5>Pontos Críticos e Riscos</h5><p>${proc.apontamentos_ia}</p></div>` : ''}
-    ${proc.sugestoes_ia ? `<div class="ia-section"><h5>Sugestões de Ação</h5><p>${proc.sugestoes_ia}</p></div>` : ''}
-    ${proc.proximos_passos_ia ? `<div class="ia-section"><h5>Próximos Passos</h5><p>${proc.proximos_passos_ia}</p></div>` : ''}
-    ${proc.processos_similares_ref ? `<div class="ia-section"><h5><i class="fa fa-link"></i> Processos Semelhantes</h5><p>${proc.processos_similares_ref}</p></div>` : ''}
-    <div style="font-size:.72rem;color:var(--muted);margin-top:12px;">Última análise: ${formatarDataHora(proc.data_atualizacao)}</div>
+  const resumo    = _iaValorLimpo(proc.resumo_ia);
+  const situacao  = proc.situacao_atual || '';
+  const apont     = proc.apontamentos_ia || '';
+  const sugest    = proc.sugestoes_ia || '';
+  const proximos  = proc.proximos_passos_ia || '';
+  const similares = proc.processos_similares_ref || '';
+  const categoria = proc.categoria || 'Processo';
+
+  // Chip de categoria
+  const catChip = `<span style="
+    display:inline-block;background:var(--accent);color:#fff;
+    font-size:.7rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+    padding:2px 10px;border-radius:20px;margin-bottom:12px;">${categoria}</span>`;
+
+  // Bloco de situação atual — destaque
+  const situacaoBloco = situacao ? `
+    <div style="background:linear-gradient(135deg,#1e3a5f,#1a2e4a);border-radius:10px;padding:14px 16px;margin-bottom:14px;color:#e2f0ff;">
+      <div style="font-size:.68rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#7fb3e0;margin-bottom:6px;">
+        📍 Situação Atual
+      </div>
+      <div style="font-size:.95rem;line-height:1.6;">${situacao}</div>
+    </div>` : '';
+
+  // Seção auxiliar reutilizável
+  const sec = (icone, titulo, conteudo, cor, bgLight, borderLeft) =>
+    conteudo ? `<div style="background:${bgLight};border-left:4px solid ${borderLeft};border-radius:0 8px 8px 0;padding:12px 14px;margin-bottom:12px;">
+      <div style="font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:${cor};margin-bottom:6px;">${icone} ${titulo}</div>
+      ${conteudo}
+    </div>` : '';
+
+  return `<div class="ia-box" style="padding:0;">
+    <div style="padding:16px 16px 0 16px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <h4 style="margin:0;display:flex;align-items:center;gap:8px;font-size:1rem;">
+          <i class="fa fa-brain" style="color:var(--accent);"></i> Análise de IA
+        </h4>
+        ${catChip}
+      </div>
+      ${situacaoBloco}
+    </div>
+
+    <div style="padding:0 16px 4px 16px;">
+      ${resumo ? `<div style="background:#f8faff;border-radius:8px;padding:14px;margin-bottom:12px;border:1px solid #e0e8f5;">
+        <div style="font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#4a6fa5;margin-bottom:8px;">📋 Resumo Gerencial</div>
+        <div style="font-size:.88rem;line-height:1.7;color:#2c3e60;">${resumo.replace(/\n/g, '<br>')}</div>
+      </div>` : ''}
+
+      ${sec('⚠️','Pontos Críticos e Riscos', _iaLista(apont,'#c0392b'), '#c0392b','#fff5f5','#e74c3c')}
+      ${sec('💡','Sugestões de Ação',        _iaLista(sugest,'#1a7a4a'), '#1a7a4a','#f0fff6','#27ae60')}
+
+      ${proximos ? `<div style="background:#fffdf0;border-left:4px solid #f39c12;border-radius:0 8px 8px 0;padding:12px 14px;margin-bottom:12px;">
+        <div style="font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#d68910;margin-bottom:8px;">🗓️ Próximos Passos</div>
+        ${(() => {
+          let itens = null;
+          const t = proximos.trim();
+          if (t.startsWith('[')) { try { itens = JSON.parse(t); } catch { itens = null; } }
+          if (itens && itens.length) {
+            return '<ol style="margin:0;padding-left:0;list-style:none;">' +
+              itens.map((it, i) => `<li style="display:flex;gap:10px;margin-bottom:8px;align-items:flex-start;">
+                <span style="background:#f39c12;color:#fff;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:.7rem;font-weight:700;flex-shrink:0;">${i+1}</span>
+                <span style="font-size:.88rem;line-height:1.5;">${it}</span></li>`).join('') +
+              '</ol>';
+          }
+          return `<p style="margin:0;font-size:.88rem;line-height:1.6;">${t}</p>`;
+        })()}
+      </div>` : ''}
+
+      ${similares ? `<div style="background:#f5f0ff;border-left:4px solid #8e44ad;border-radius:0 8px 8px 0;padding:10px 14px;margin-bottom:12px;">
+        <div style="font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#6c3483;margin-bottom:6px;">🔗 Processos Semelhantes</div>
+        <div style="font-size:.83rem;line-height:1.6;color:#4a235a;">${similares.replace(/\n/g,'<br>')}</div>
+      </div>` : ''}
+    </div>
+
+    <div style="padding:6px 16px 14px;text-align:right;">
+      <span style="font-size:.68rem;color:var(--muted);">Última análise: ${formatarDataHora(proc.data_atualizacao)}</span>
+    </div>
   </div>`;
 }
 
