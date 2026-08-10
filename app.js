@@ -1023,9 +1023,66 @@ function renderIABox(proc) {
 
 async function acionarIAManual(sei) {
   const statusEl = document.getElementById('ia-status-msg');
+  if (statusEl) statusEl.innerHTML = '<span class="spinner"></span> Verificando IA local...';
+
+  const ollamaOk = await testarOllama();
+  if (!ollamaOk) {
+    if (statusEl) statusEl.innerHTML = `
+      <div style="background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:12px;font-size:.83rem;line-height:1.6;">
+        <strong>⚠️ Ollama não está rodando</strong><br>
+        Para gerar a análise, abra um terminal e execute:<br>
+        <code style="background:#f8f9fa;padding:2px 6px;border-radius:4px;display:inline-block;margin:6px 0;">ollama serve</code><br>
+        Depois clique em <strong>Atualizar Análise IA</strong> novamente.<br>
+        <span style="color:#666;font-size:.78rem;">Modelo configurado: <strong>${OLLAMA_MODEL}</strong> —
+        para trocar: <a href="#" onclick="abrirConfigModelo();return false;">clique aqui</a></span>
+      </div>`;
+    return;
+  }
+
   if (statusEl) statusEl.innerHTML = '<span class="spinner"></span> Gerando análise completa...';
   await acionarIA(sei);
   abrirProcesso(sei);
+}
+
+function abrirConfigModelo() {
+  const modelos = [
+    { id: 'llama3.2:3b',  label: 'llama3.2:3b  — atual (rápido, qualidade básica, ~2GB)' },
+    { id: 'qwen2.5:7b',   label: 'qwen2.5:7b   — recomendado (boa qualidade, ~5GB)' },
+    { id: 'phi4:14b',     label: 'phi4:14b      — melhor qualidade local (~9GB)' },
+    { id: 'mistral:7b',   label: 'mistral:7b    — boa instrução (~4.5GB)' },
+    { id: 'llama3.1:8b',  label: 'llama3.1:8b   — equilibrado (~5GB)' },
+  ];
+  const optsHtml = modelos.map(m =>
+    `<option value="${m.id}" ${OLLAMA_MODEL === m.id ? 'selected' : ''}>${m.label}</option>`
+  ).join('');
+  criarModal(`
+    <h2 style="margin-bottom:16px;"><i class="fa fa-brain"></i> Modelo de IA Local (Ollama)</h2>
+    <p style="font-size:.87rem;color:var(--muted);margin-bottom:16px;">
+      Todos os modelos rodam 100% no seu computador — nenhum dado sai da máquina.<br>
+      Para instalar um modelo: <code>ollama pull nome-do-modelo</code>
+    </p>
+    <div class="form-group">
+      <label>Modelo ativo</label>
+      <select id="sel-modelo">${optsHtml}</select>
+    </div>
+    <div style="background:#e8f4fd;border-radius:8px;padding:10px 12px;font-size:.8rem;margin-top:8px;">
+      💡 Com 16GB RAM: <strong>qwen2.5:7b</strong> é o melhor custo-benefício — instale com:<br>
+      <code>ollama pull qwen2.5:7b</code>
+    </div>
+    <div style="margin-top:20px;display:flex;gap:8px;justify-content:flex-end;">
+      <button class="btn btn-secondary" onclick="fecharModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="salvarModelo()">Salvar</button>
+    </div>
+  `);
+}
+
+function salvarModelo() {
+  const sel = document.getElementById('sel-modelo');
+  if (!sel) return;
+  OLLAMA_MODEL = sel.value;
+  localStorage.setItem('ollama_model', OLLAMA_MODEL);
+  fecharModal();
+  verificarOllama();
 }
 
 function switchTab(el, id) {
@@ -1514,7 +1571,12 @@ ${amostra}`;
 
 // ==================== IA ANÁLISE COMPLETA ====================
 async function acionarIA(sei) {
-  const ollamaOk = await testarOllama(); if (!ollamaOk) return;
+  const ollamaOk = await testarOllama();
+  if (!ollamaOk) {
+    const statusEl = document.getElementById('ia-status-msg');
+    if (statusEl) statusEl.innerHTML = `<div style="color:#c0392b;font-size:.83rem;">⚠️ Ollama não está acessível em localhost:11434. Execute <code>ollama serve</code> no terminal.</div>`;
+    return;
+  }
 
   // ── Carrega dados em paralelo ─────────────────────────────────────────
   const [resDocs, resConteudo, resP, resA, resAnot, resSim] = await Promise.all([
