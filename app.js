@@ -34,7 +34,8 @@ function _urgenciaInfo(p) {
 const OLLAMA_URL   = 'http://localhost:11434/api/generate';
 let   OLLAMA_MODEL = localStorage.getItem('ollama_model') || 'llama3.2:3b';
 const BLOCO_MAX    = 49000;
-const RELEVANCIA_MAX_CHARS = 60000;
+const RELEVANCIA_MAX_CHARS = 20000; // reduzido para performance (era 60000)
+const OLLAMA_TIMEOUT_MS    = 180000; // 3 minutos por chamada Ollama
 
 // ==================== STATE ====================
 let API_URL        = '';
@@ -1401,11 +1402,11 @@ ${amostra}`;
   }
 }
 
-// ==================== IA ANÁLISE COMPLETA (2 fases) ====================
+// ==================== IA ANÁLISE COMPLETA ====================
 async function acionarIA(sei) {
   const ollamaOk = await testarOllama(); if (!ollamaOk) return;
 
-  // ── Carrega dados em paralelo ────────────────────────────────────────
+  // ── Carrega dados em paralelo ─────────────────────────────────────────
   const [resDocs, resConteudo, resP, resA, resAnot, resSim] = await Promise.all([
     api('documentos/listar?sei=' + sei),
     api('conteudo/listar?sei=' + sei),
@@ -1425,141 +1426,125 @@ async function acionarIA(sei) {
   const anotacoes = (resAnot.anotacoes || []).slice(-5).map(a =>
     `${formatarDataHora(a.data_hora)}: ${a.texto||''}`
   ).join('\n');
-
   let similares = resSim.processos || [];
-  if (!similares.length && proc.tipo) {
+  if (!similares.length && proc.tipo)
     similares = todosProcessos.filter(p => p.numero_sei !== sei && p.tipo === proc.tipo).slice(0, 3);
-  }
-  const similaresTxt = similares.length
-    ? similares.map(s => `SEI ${s.numero_sei}: ${s.titulo} — ${s.situacao_atual || s.resumo_ia || 'sem análise'}`).join('\n')
-    : '';
+  const similaresTxt = similares.map(s => `SEI ${s.numero_sei}: ${s.titulo} — ${s.situacao_atual||s.resumo_ia||''}`).join('\n');
 
-  // Bases legais REMOVIDAS do prompt — o modelo já tem esse conhecimento no treinamento
-  // e injetá-las causa contaminação quando o conteúdo dos documentos é mais específico.
-
-  // ── FASE 1: resumos de todos os documentos ───────────────────────────
-  // Usa resumo_doc salvo (gerado na importação) ou os primeiros 300 chars do texto
+  // ── Monta resumos por documento ──────────────────────────────────────
   const resumosPorDoc = docs.map(d => {
-    const resumoSalvo = (d.resumo_doc || '').trim();
-    if (resumoSalvo) return { id: d.id, nome: d.nome_arquivo, resumo: resumoSalvo };
-
-    // Fallback: primeiros 1500 chars dos blocos deste documento
-    const blocoDoc = todosBloc
-      .filter(b => b.documento_id === d.id)
+    const r = (d.resumo_doc || '').trim();
+    if (r) return { id: d.id, nome: d.nome_arquivo, resumo: r };
+    const blocoDoc = todosBloc.filter(b => b.documento_id === d.id)
       .sort((a, b2) => a.bloco_num - b2.bloco_num);
-    const trecho = blocoDoc.map(b => b.conteudo || '').join('\n').substring(0, 1500).trim();
-    return { id: d.id, nome: d.nome_arquivo, resumo: trecho || '(sem texto extraído)' };
+    const trecho = blocoDoc.map(b => b.conteudo || '').join('\n').substring(0, 800).trim();
+    return { id: d.id, nome: d.nome_arquivo, resumo: trecho || '(sem texto)' };
   });
 
-  const resumosTxt = resumosPorDoc
-    .map((r, i) => `[${i+1}] ${r.nome}\n${r.resumo}`)
-    .join('\n\n');
+  const resumosTxt = resumosPorDoc.map((r, i) => `[${i+1}] ${r.nome}: ${r.resumo}`).join('\n');
 
-  // ── FASE 1: IA seleciona documentos mais relevantes ─────────────────
-  let docsRelevantesIds = [];
-  if (resumosPorDoc.length > 0 && ollamaOk) {
-    const promptSelecao = `Você é assistente de gestão de processos públicos.
-
-Processo: ${proc.titulo||sei} (${proc.tipo||''}, ${proc.unidade||''})
-
-Abaixo estão resumos de ${resumosPorDoc.length} documentos do processo.
-Identifique os 5 documentos MÁS RELEVANTES para uma análise gerencial completa.
-Considere: decisões recentes, valores, prazos, riscos e documentos técnicos.
-
-${resumosTxt}
-
-Responda APENAS com os números entre colchetes dos documentos selecionados, separados por vírgula.
-Exemplo: 1,3,5,7,9`;
-
+  // ── Seleciona os docs mais relevantes (sem Ollama se ≤5 docs) ────────
+  let docsRelevantesIds;
+  if (resumosPorDoc.length <= 5) {
+    // Poucos docs: usa todos sem chamada extra ao Ollama
+    docsRelevantesIds = resumosPorDoc.map(r => r.id);
+  } else {
+    // Muitos docs: pede ao Ollama para selecionar — com timeout de 60s
+    docsRelevantesIds = resumosPorDoc.slice(0, 5).map(r => r.id); // fallback
     try {
-      const rSel  = await fetch(OLLAMA_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ model: OLLAMA_MODEL, prompt: promptSelecao, stream: false }) });
-      const dSel  = await rSel.json();
-      const nums  = (dSel.response || '').match(/\d+/g) || [];
-      docsRelevantesIds = nums
-        .map(n => parseInt(n) - 1)
-        .filter(i => i >= 0 && i < resumosPorDoc.length)
-        .slice(0, 5)
+      const ctrl = new AbortController();
+      const tid  = setTimeout(() => ctrl.abort(), 60000);
+      const rSel = await fetch(OLLAMA_URL, {
+        method: 'POST', signal: ctrl.signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: OLLAMA_MODEL, stream: false,
+          prompt: `Lista de documentos do processo "${proc.titulo||sei}":\n${resumosTxt}\n\nResponda APENAS com os números (ex: 1,3,5) dos 5 documentos mais relevantes para análise gerencial.`
+        })
+      });
+      clearTimeout(tid);
+      const dSel = await rSel.json();
+      const nums = (dSel.response || '').match(/\d+/g) || [];
+      const selecionados = nums.map(n => parseInt(n) - 1)
+        .filter(i => i >= 0 && i < resumosPorDoc.length).slice(0, 5)
         .map(i => resumosPorDoc[i].id);
-    } catch(e) {
-      console.warn('[IA Fase 1] Falha na seleção, usando todos os docs:', e);
-    }
+      if (selecionados.length) docsRelevantesIds = selecionados;
+    } catch(e) { console.warn('[IA seleção] timeout/erro, usando primeiros 5:', e.message); }
   }
 
-  // Se a seleção falhou, usa todos (fallback seguro)
-  if (!docsRelevantesIds.length) {
-    docsRelevantesIds = resumosPorDoc.slice(0, 5).map(r => r.id);
-  }
-
-  // ── FASE 2: texto integral dos docs selecionados ─────────────────────
+  // ── Texto integral dos docs selecionados (limitado) ──────────────────
+  const charsPorDoc = Math.floor(RELEVANCIA_MAX_CHARS / Math.max(docsRelevantesIds.length, 1));
   const textoIntegral = docsRelevantesIds.map(docId => {
-    const blocos = todosBloc
-      .filter(b => b.documento_id === docId)
-      .sort((a, b2) => a.bloco_num - b2.bloco_num)
-      .map(b => b.conteudo || '');
-    const nomeDoc = (docs.find(d => d.id === docId) || {}).nome_arquivo || docId;
-    const texto = filtrarBlocos(blocos, keywords, Math.floor(RELEVANCIA_MAX_CHARS / Math.max(docsRelevantesIds.length, 1)));
-    return texto ? `--- ${nomeDoc} ---\n${texto}` : '';
+    const blocos = todosBloc.filter(b => b.documento_id === docId)
+      .sort((a, b2) => a.bloco_num - b2.bloco_num).map(b => b.conteudo || '');
+    const nome = (docs.find(d => d.id === docId) || {}).nome_arquivo || docId;
+    const txt  = filtrarBlocos(blocos, [proc.titulo||'', proc.unidade||'', sei], charsPorDoc);
+    return txt ? `=== ${nome} ===\n${txt}` : '';
   }).filter(Boolean).join('\n\n');
 
-  const temConteudo = !!(textoIntegral || resumosTxt);
-  if (!temConteudo) console.warn('[IA] Sem conteúdo de documentos para', sei);
+  // ── Prompt único otimizado ────────────────────────────────────────────
+  const prompt = `Você é assistente de gestão de processos administrativos públicos.
 
-  // ── FASE 2: análise final ─────────────────────────────────────────────
-  const prompt = `Você é um assistente de gestão de processos administrativos públicos.
+REGRA: Analise SOMENTE o processo abaixo. Use apenas informações dos documentos e andamentos fornecidos. Não invente dados.
 
-REGRA ABSOLUTA: Analise SOMENTE o processo SEI ${sei} descrito abaixo. Cada informação da sua resposta (nomes de unidades, datas, valores, decisões, responsáveis) deve estar presente no texto dos documentos ou andamentos fornecidos. Se uma informação não estiver nos documentos, escreva "não consta nos documentos". NUNCA use exemplos genéricos, modelos de texto ou conhecimento externo.
+PROCESSO: ${proc.titulo||sei}
+SEI: ${sei} | Unidade: ${proc.unidade||'—'} | OSS: ${proc.oss||'—'} | Status: ${proc.status||''} | Prioridade: ${proc.prioridade||''}
 
-=== PROCESSO: ${proc.titulo||sei} ===
-Número SEI: ${sei}
-Tipo: ${proc.tipo||'Não informado'} | Status: ${proc.status||''} | Prioridade: ${proc.prioridade||''}
-Unidade: ${proc.unidade||'Não informada'} | OSS: ${proc.oss||'Não informada'}
+ANDAMENTOS:
+${andamentos || 'Nenhum.'}
 
-ANDAMENTOS RECENTES:
-${andamentos || 'Nenhum andamento registrado.'}
+RESUMOS DOS DOCUMENTOS:
+${resumosTxt || 'Nenhum.'}
 
-ANOTAÇÕES:
-${anotacoes || 'Nenhuma anotação.'}
-
-RESUMOS DOS ${resumosPorDoc.length} DOCUMENTOS DO PROCESSO:
-${resumosTxt || 'Nenhum documento com resumo disponível.'}
-
-CONTEÚDO INTEGRAL DOS DOCUMENTOS MAIS RELEVANTES:
+CONTEÚDO DOS DOCUMENTOS PRINCIPAIS:
 ${textoIntegral || 'Não disponível.'}
 
 ${similaresTxt ? 'PROCESSOS SEMELHANTES:\n' + similaresTxt : ''}
 
-Responda EXATAMENTE neste formato JSON (sem markdown, sem texto fora do JSON):
-{
-  "categoria": "categoria do processo em 3-5 palavras",
-  "situacao_atual": "situação atual em 1-2 frases objetivas, citando apenas fatos dos documentos acima",
-  "resumo": "análise gerencial detalhada com contexto, histórico e situação atual (mín. 3 parágrafos), baseada exclusivamente nos documentos fornecidos",
-  "apontamentos": "pontos críticos, riscos e alertas identificados nos documentos",
-  "sugestoes": "sugestões práticas baseadas nos documentos e bases legais aplicáveis",
-  "proximos_passos": "próximos passos concretos com responsáveis e prazos, inferidos dos documentos",
-  "processos_similares": "${similaresTxt ? 'comparação com os processos semelhantes listados acima' : 'sem processos semelhantes identificados no sistema'}"
-}`;
+Responda em JSON (sem markdown):
+{"categoria":"...","situacao_atual":"...","resumo":"...","apontamentos":"...","sugestoes":"...","proximos_passos":"...","processos_similares":"..."}`;
 
+  // ── Chamada Ollama com timeout e streaming para feedback visual ───────
+  const statusEl = document.getElementById('ia-status-msg');
   try {
-    const resp = await fetch(OLLAMA_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ model:OLLAMA_MODEL, prompt, stream:false }) });
+    const ctrl = new AbortController();
+    const tid  = setTimeout(() => ctrl.abort(), OLLAMA_TIMEOUT_MS);
+
+    if (statusEl) statusEl.innerHTML = '<span class="spinner"></span> Gerando análise (pode levar 1-2 min)...';
+
+    const resp = await fetch(OLLAMA_URL, {
+      method: 'POST', signal: ctrl.signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: OLLAMA_MODEL, prompt, stream: false })
+    });
+    clearTimeout(tid);
+
     const data = await resp.json();
     const raw  = (data.response || '').trim();
     let ia;
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (jsonMatch) { try { ia = JSON.parse(jsonMatch[0]); } catch { ia = null; } }
-    if (!ia) ia = { categoria:'Análise', situacao_atual:'', resumo:raw, apontamentos:'', sugestoes:'', proximos_passos:'', processos_similares:'' };
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (m) { try { ia = JSON.parse(m[0]); } catch { ia = null; } }
+    if (!ia) ia = { categoria: 'Análise', situacao_atual: '', resumo: raw, apontamentos: '', sugestoes: '', proximos_passos: '', processos_similares: '' };
 
     await api('processos/salvar-ia', {
-      numero_sei:              sei,
-      categoria:               ia.categoria             || '',
-      situacao_atual:          ia.situacao_atual         || '',
-      resumo_ia:               ia.resumo                 || '',
-      apontamentos_ia:         ia.apontamentos           || '',
-      sugestoes_ia:            ia.sugestoes              || '',
-      proximos_passos_ia:      ia.proximos_passos        || '',
-      processos_similares_ref: ia.processos_similares    || ''
+      numero_sei: sei,
+      categoria:               ia.categoria          || '',
+      situacao_atual:          ia.situacao_atual      || '',
+      resumo_ia:               ia.resumo              || '',
+      apontamentos_ia:         ia.apontamentos        || '',
+      sugestoes_ia:            ia.sugestoes           || '',
+      proximos_passos_ia:      ia.proximos_passos     || '',
+      processos_similares_ref: ia.processos_similares || ''
     });
-    api('log/registrar', { acao:'ANALISE_IA', numero_sei:sei, detalhes:`Análise 2 fases — ${resumosPorDoc.length} docs, ${docsRelevantesIds.length} selecionados` });
-  } catch(e) { console.warn('Erro na análise IA:', e); }
+    api('log/registrar', { acao: 'ANALISE_IA', numero_sei: sei, detalhes: `${resumosPorDoc.length} docs, ${docsRelevantesIds.length} selecionados` });
+  } catch(e) {
+    if (e.name === 'AbortError') {
+      console.warn('[IA] Timeout após', OLLAMA_TIMEOUT_MS / 1000, 's');
+      if (statusEl) statusEl.innerHTML = '⚠️ Análise cancelada por timeout (3 min). Tente com menos documentos ou um modelo menor.';
+    } else {
+      console.warn('[IA] Erro:', e);
+    }
+  }
 }
 
 function filtrarBlocos(blocos, keywords, maxChars) {
