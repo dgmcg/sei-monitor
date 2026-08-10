@@ -1592,15 +1592,17 @@ async function acionarIA(sei) {
     return txt ? `=== ${nome} ===\n${txt}` : '';
   }).filter(Boolean).join('\n\n');
 
-  // ── Prompt único otimizado ────────────────────────────────────────────
+  // ── Prompt com separadores de texto — sem JSON, sem falha de parse ──
+  const SEPARADORES = ['CATEGORIA','SITUACAO_ATUAL','RESUMO','APONTAMENTOS','SUGESTOES','PROXIMOS_PASSOS','PROCESSOS_SIMILARES'];
+
   const prompt = `Você é assistente de gestão de processos administrativos públicos.
 
-REGRA: Analise SOMENTE o processo abaixo. Use apenas informações dos documentos e andamentos fornecidos. Não invente dados.
+REGRA: Analise SOMENTE o processo abaixo. Use APENAS informações presentes nos documentos e andamentos fornecidos. Não invente dados.
 
 PROCESSO: ${proc.titulo||sei}
 SEI: ${sei} | Unidade: ${proc.unidade||'—'} | OSS: ${proc.oss||'—'} | Status: ${proc.status||''} | Prioridade: ${proc.prioridade||''}
 
-ANDAMENTOS:
+ANDAMENTOS RECENTES:
 ${andamentos || 'Nenhum.'}
 
 RESUMOS DOS DOCUMENTOS:
@@ -1611,10 +1613,45 @@ ${textoIntegral || 'Não disponível.'}
 
 ${similaresTxt ? 'PROCESSOS SEMELHANTES:\n' + similaresTxt : ''}
 
-Responda em JSON (sem markdown):
-{"categoria":"...","situacao_atual":"...","resumo":"...","apontamentos":"...","sugestoes":"...","proximos_passos":"...","processos_similares":"..."}`;
+Responda EXATAMENTE neste formato, usando os marcadores abaixo (não omita nenhum marcador):
 
-  // ── Chamada Ollama com timeout e streaming para feedback visual ───────
+===CATEGORIA===
+(categoria do processo em 3-5 palavras)
+===SITUACAO_ATUAL===
+(situação atual em 1-2 frases objetivas, citando apenas fatos dos documentos acima)
+===RESUMO===
+(análise gerencial detalhada com contexto e histórico — mínimo 3 parágrafos — baseada exclusivamente nos documentos fornecidos)
+===APONTAMENTOS===
+(liste cada ponto crítico ou risco em uma linha separada, começando com "- ")
+===SUGESTOES===
+(liste cada sugestão prática em uma linha separada, começando com "- ")
+===PROXIMOS_PASSOS===
+(liste cada próximo passo em uma linha separada, começando com "- ", incluindo responsável e prazo quando disponível)
+===PROCESSOS_SIMILARES===
+(comparação com processos semelhantes, ou "Nenhum processo similar identificado.")`;
+
+  // ── Parser de separadores: sem JSON, impossível falhar ───────────────
+  function parsearResposta(raw) {
+    const resultado = {};
+    const partes = raw.split(/===([A-Z_]+)===/);
+    // partes = ['texto antes', 'CHAVE', 'valor', 'CHAVE2', 'valor2', ...]
+    for (let i = 1; i < partes.length - 1; i += 2) {
+      const chave = partes[i].trim();
+      const valor = partes[i + 1].trim();
+      resultado[chave] = valor;
+    }
+    return resultado;
+  }
+
+  /** Converte lista markdown ("- item") em array de strings */
+  function parsearLista(texto) {
+    if (!texto) return '';
+    return texto.split('\n')
+      .map(l => l.replace(/^[-•*]\s*/, '').trim())
+      .filter(Boolean);
+  }
+
+  // ── Chamada Ollama com timeout ────────────────────────────────────────
   const statusEl = document.getElementById('ia-status-msg');
   try {
     const ctrl = new AbortController();
@@ -1631,22 +1668,28 @@ Responda em JSON (sem markdown):
 
     const data = await resp.json();
     const raw  = (data.response || '').trim();
-    let ia;
-    const m = raw.match(/\{[\s\S]*\}/);
-    if (m) { try { ia = JSON.parse(m[0]); } catch { ia = null; } }
-    if (!ia) ia = { categoria: 'Análise', situacao_atual: '', resumo: raw, apontamentos: '', sugestoes: '', proximos_passos: '', processos_similares: '' };
+    const ia   = parsearResposta(raw);
+
+    // Converte listas em JSON array para o renderIABox poder renderizar como bullets
+    const listaParaJSON = txt => {
+      const itens = parsearLista(txt);
+      return itens.length > 1 ? JSON.stringify(itens) : (txt || '');
+    };
 
     await api('processos/salvar-ia', {
-      numero_sei: sei,
-      categoria:               ia.categoria          || '',
-      situacao_atual:          ia.situacao_atual      || '',
-      resumo_ia:               ia.resumo              || '',
-      apontamentos_ia:         ia.apontamentos        || '',
-      sugestoes_ia:            ia.sugestoes           || '',
-      proximos_passos_ia:      ia.proximos_passos     || '',
-      processos_similares_ref: ia.processos_similares || ''
+      numero_sei:              sei,
+      categoria:               ia.CATEGORIA                          || 'Processo',
+      situacao_atual:          ia.SITUACAO_ATUAL                     || '',
+      resumo_ia:               ia.RESUMO                             || raw,
+      apontamentos_ia:         listaParaJSON(ia.APONTAMENTOS         || ''),
+      sugestoes_ia:            listaParaJSON(ia.SUGESTOES            || ''),
+      proximos_passos_ia:      listaParaJSON(ia.PROXIMOS_PASSOS      || ''),
+      processos_similares_ref: ia.PROCESSOS_SIMILARES                || similaresTxt || ''
     });
-    api('log/registrar', { acao: 'ANALISE_IA', numero_sei: sei, detalhes: `${resumosPorDoc.length} docs, ${docsRelevantesIds.length} selecionados` });
+
+    api('log/registrar', { acao: 'ANALISE_IA', numero_sei: sei,
+      detalhes: `${resumosPorDoc.length} docs, ${docsRelevantesIds.length} selecionados` });
+
   } catch(e) {
     if (e.name === 'AbortError') {
       console.warn('[IA] Timeout após', OLLAMA_TIMEOUT_MS / 1000, 's');
