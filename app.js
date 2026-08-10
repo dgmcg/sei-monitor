@@ -1406,10 +1406,9 @@ async function acionarIA(sei) {
   const ollamaOk = await testarOllama(); if (!ollamaOk) return;
 
   // ── Carrega dados em paralelo ────────────────────────────────────────
-  const [resDocs, resConteudo, resBases, resP, resA, resAnot, resSim] = await Promise.all([
+  const [resDocs, resConteudo, resP, resA, resAnot, resSim] = await Promise.all([
     api('documentos/listar?sei=' + sei),
     api('conteudo/listar?sei=' + sei),
-    api('bases-legais/listar'),
     api('processos/obter?sei=' + sei),
     api('andamentos/listar?sei=' + sei),
     api('anotacoes/listar?sei=' + sei),
@@ -1418,7 +1417,7 @@ async function acionarIA(sei) {
 
   const proc      = resP.processo || {};
   const docs      = resDocs.documentos || [];
-  const todosBloc = resConteudo.blocos || [];  // [{documento_id, bloco_num, conteudo}]
+  const todosBloc = resConteudo.blocos || [];
 
   const andamentos = (resA.andamentos || []).slice(-10).map(a =>
     `${formatarDataGAS(a.data_movimento)} ${formatarHoraGAS(a.hora_movimento)}: ${a.descricao||''}`
@@ -1435,12 +1434,8 @@ async function acionarIA(sei) {
     ? similares.map(s => `SEI ${s.numero_sei}: ${s.titulo} — ${s.situacao_atual || s.resumo_ia || 'sem análise'}`).join('\n')
     : '';
 
-  const basesLegais = (resBases.blocos || []).map(b => b.conteudo || '');
-  const keywords = [
-    proc.titulo||'', proc.tipo||'', proc.unidade||'', proc.oss||'', sei,
-    'contrato','prazo','pagamento','execução','saúde','regulação','OSS'
-  ].join(' ').toLowerCase().split(/\s+/).filter(k => k.length > 3);
-  const basesLegaisFiltradas = filtrarBlocos(basesLegais, keywords, 12000);
+  // Bases legais REMOVIDAS do prompt — o modelo já tem esse conhecimento no treinamento
+  // e injetá-las causa contaminação quando o conteúdo dos documentos é mais específico.
 
   // ── FASE 1: resumos de todos os documentos ───────────────────────────
   // Usa resumo_doc salvo (gerado na importação) ou os primeiros 300 chars do texto
@@ -1506,40 +1501,32 @@ Exemplo: 1,3,5,7,9`;
     return texto ? `--- ${nomeDoc} ---\n${texto}` : '';
   }).filter(Boolean).join('\n\n');
 
-  // Aviso de contexto
   const temConteudo = !!(textoIntegral || resumosTxt);
-  if (!temConteudo) {
-    console.warn('[IA] Nenhum conteúdo de documento disponível para o processo', sei);
-  }
+  if (!temConteudo) console.warn('[IA] Sem conteúdo de documentos para', sei);
 
   // ── FASE 2: análise final ─────────────────────────────────────────────
-  const prompt = `Você é um ESPECIALISTA em gestão de contratos, processos administrativos e regulação de Organizações Sociais de Saúde (OSS) no setor público brasileiro.
+  const prompt = `Você é um assistente de gestão de processos administrativos públicos.
 
-⚠️ INSTRUÇÃO CRÍTICA: Baseie sua análise EXCLUSIVAMENTE nos dados do processo e nos documentos fornecidos abaixo. NÃO use conhecimento externo nem invente informações. Nomes de unidades, valores, datas e responsáveis devem vir SOMENTE do texto fornecido.
+REGRA ABSOLUTA: Analise SOMENTE o processo SEI ${sei} descrito abaixo. Cada informação da sua resposta (nomes de unidades, datas, valores, decisões, responsáveis) deve estar presente no texto dos documentos ou andamentos fornecidos. Se uma informação não estiver nos documentos, escreva "não consta nos documentos". NUNCA use exemplos genéricos, modelos de texto ou conhecimento externo.
 
-=== PROCESSO SEI ${sei} ===
-TÍTULO: ${proc.titulo||''}
-TIPO: ${proc.tipo||'Não informado'}
-STATUS: ${proc.status||''}
-PRIORIDADE: ${proc.prioridade||''}
-UNIDADE: ${proc.unidade||'Não informada'}
-OSS: ${proc.oss||'Não informada'}
+=== PROCESSO: ${proc.titulo||sei} ===
+Número SEI: ${sei}
+Tipo: ${proc.tipo||'Não informado'} | Status: ${proc.status||''} | Prioridade: ${proc.prioridade||''}
+Unidade: ${proc.unidade||'Não informada'} | OSS: ${proc.oss||'Não informada'}
 
-ÚLTIMOS ANDAMENTOS:
+ANDAMENTOS RECENTES:
 ${andamentos || 'Nenhum andamento registrado.'}
 
-ANOTAÇÕES DE GESTÃO:
+ANOTAÇÕES:
 ${anotacoes || 'Nenhuma anotação.'}
 
-=== DOCUMENTOS DO PROCESSO (${resumosPorDoc.length} documentos) ===
-${resumosTxt || 'Nenhum documento disponível.'}
+RESUMOS DOS ${resumosPorDoc.length} DOCUMENTOS DO PROCESSO:
+${resumosTxt || 'Nenhum documento com resumo disponível.'}
 
-=== CONTEÚDO DOS DOCUMENTOS MAIS RELEVANTES ===
-${textoIntegral || 'Não disponível — use apenas os resumos e andamentos acima.'}
+CONTEÚDO INTEGRAL DOS DOCUMENTOS MAIS RELEVANTES:
+${textoIntegral || 'Não disponível.'}
 
-${temConteudo && basesLegaisFiltradas ? '=== BASES LEGAIS DE REFERÊNCIA (use apenas se aplicável aos documentos acima) ===\n' + basesLegaisFiltradas : ''}
-
-${similaresTxt ? '=== PROCESSOS SEMELHANTES NO SISTEMA ===\n' + similaresTxt : ''}
+${similaresTxt ? 'PROCESSOS SEMELHANTES:\n' + similaresTxt : ''}
 
 Responda EXATAMENTE neste formato JSON (sem markdown, sem texto fora do JSON):
 {
