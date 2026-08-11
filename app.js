@@ -199,7 +199,7 @@ function iniciarApp() {
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('sidebar-nome').textContent  = usuarioAtual.nome;
   document.getElementById('sidebar-email').textContent = usuarioAtual.usuario;
-  if (usuarioAtual.perfil === 'admin') document.getElementById('nav-admin').classList.remove('hidden');
+  document.getElementById('nav-admin').classList.remove('hidden'); // todos os perfis têm acesso a config pessoal
   // Mostrar chat após login
   const chatFab = document.getElementById('chat-fab');
   if (chatFab) chatFab.style.display = '';
@@ -2203,21 +2203,31 @@ async function cadastrarProcesso() {
 
 // ==================== ADMIN ====================
 async function renderAdmin() {
-  if (usuarioAtual?.perfil !== 'admin') { document.getElementById('content').innerHTML = '<div class="alert alert-danger">Acesso negado.</div>'; return; }
+  const isAdmin = usuarioAtual?.perfil === 'admin';
+
+  // Abas exclusivas de admin
+  const tabsExclusivas = isAdmin ? `
+    <div class="tab" onclick="switchTabAdmin(this,'adm-usuarios')">Usuários</div>
+    <div class="tab" onclick="switchTabAdmin(this,'adm-bases')">Bases Legais</div>
+    <div class="tab" onclick="switchTabAdmin(this,'adm-logs')">Logs</div>` : '';
+
+  // Divs exclusivos de admin (ocultos para não-admins)
+  const divsExclusivos = isAdmin ? `
+    <div id="adm-usuarios" class="hidden"><span class="spinner"></span></div>
+    <div id="adm-bases"    class="hidden"><span class="spinner"></span></div>
+    <div id="adm-logs"     class="hidden"><span class="spinner"></span></div>` : '';
+
   document.getElementById('content').innerHTML = `
   <div class="tabs">
-    <div class="tab active" onclick="switchTabAdmin(this,'adm-usuarios')">Usuários</div>
-    <div class="tab" onclick="switchTabAdmin(this,'adm-config')">Configurações</div>
-    <div class="tab" onclick="switchTabAdmin(this,'adm-dados')">Dados Fixos</div>
-    <div class="tab" onclick="switchTabAdmin(this,'adm-bases')">Bases Legais</div>
-    <div class="tab" onclick="switchTabAdmin(this,'adm-logs')">Logs</div>
+    <div class="tab active" onclick="switchTabAdmin(this,'adm-config')">Minha Conta</div>
+    <div class="tab" onclick="switchTabAdmin(this,'adm-dados')">Dados Cadastrais</div>
+    ${tabsExclusivas}
   </div>
-  <div id="adm-usuarios"><span class="spinner"></span> Carregando...</div>
-  <div id="adm-config" class="hidden"><span class="spinner"></span></div>
+  <div id="adm-config"><span class="spinner"></span></div>
   <div id="adm-dados" class="hidden"><span class="spinner"></span></div>
-  <div id="adm-bases" class="hidden"><span class="spinner"></span></div>
-  <div id="adm-logs" class="hidden"><span class="spinner"></span></div>`;
-  carregarAdmUsuarios();
+  ${divsExclusivos}`;
+
+  carregarAdmConfig(); // abre em "Minha Conta" por padrão
 }
 
 function switchTabAdmin(el, id) {
@@ -2249,8 +2259,9 @@ async function carregarAdmUsuarios() {
       <td><span class="badge-status">${u.perfil}</span></td>
       <td><span class="badge-status">${u.ativo!==false?'Ativo':'Inativo'}</span></td>
       <td>
-        <button class="btn btn-secondary btn-sm" onclick="mostrarResetSenha('${u.usuario}')"><i class="fa fa-key"></i></button>
-        <button class="btn btn-danger btn-sm" onclick="removerUsuario('${u.usuario}')"><i class="fa fa-trash"></i></button>
+        <button class="btn btn-secondary btn-sm" title="Editar" onclick="mostrarEditarUsuario('${u.usuario}','${(u.nome||'').replace(/'/g,"\\'")}','${u.perfil}')"><i class="fa fa-edit"></i></button>
+        <button class="btn btn-secondary btn-sm" title="Redefinir senha" onclick="mostrarResetSenha('${u.usuario}')"><i class="fa fa-key"></i></button>
+        <button class="btn btn-danger btn-sm" title="Remover" onclick="removerUsuario('${u.usuario}')"><i class="fa fa-trash"></i></button>
       </td></tr>`).join('')}
     </tbody></table>`;
 }
@@ -2301,8 +2312,70 @@ async function removerUsuario(usuario) {
   if (res.ok) carregarAdmUsuarios(); else alert('Erro: '+res.erro);
 }
 
+function mostrarEditarUsuario(usuario, nome, perfil) {
+  criarModal(`
+    <h2 style="margin-bottom:16px;"><i class="fa fa-user-edit"></i> Editar Usuário</h2>
+    <div class="form-group">
+      <label>Nome</label>
+      <input id="eu-nome" value="${nome.replace(/"/g,'&quot;')}">
+    </div>
+    <div class="form-group">
+      <label>Perfil</label>
+      <select id="eu-perfil">
+        <option value="usuario" ${perfil==='usuario'?'selected':''}>Usuário</option>
+        <option value="admin"   ${perfil==='admin'  ?'selected':''}>Administrador</option>
+      </select>
+    </div>
+    <div id="eu-err" class="hidden alert alert-danger" style="margin-bottom:8px;"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+      <button class="btn btn-secondary" onclick="fecharModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="salvarEdicaoUsuario('${usuario}')">Salvar</button>
+    </div>`);
+}
+
+async function salvarEdicaoUsuario(usuario) {
+  const nome   = document.getElementById('eu-nome').value.trim();
+  const perfil = document.getElementById('eu-perfil').value;
+  const errEl  = document.getElementById('eu-err');
+  if (!nome) { errEl.textContent='Nome obrigatório.'; errEl.classList.remove('hidden'); return; }
+  const res = await api('usuarios/editar', { usuario, nome, perfil });
+  if (!res.ok) { errEl.textContent = res.erro || 'Erro ao salvar.'; errEl.classList.remove('hidden'); return; }
+  fecharModal();
+  carregarAdmUsuarios();
+}
+
+async function alterarMinhaSenha() {
+  const atual     = document.getElementById('senha-atual').value;
+  const nova      = document.getElementById('senha-nova').value;
+  const confirma  = document.getElementById('senha-confirma').value;
+  const statusEl  = document.getElementById('senha-status');
+
+  const mostrar = (msg, tipo) => {
+    statusEl.textContent = msg;
+    statusEl.className = `alert alert-${tipo}`;
+    statusEl.classList.remove('hidden');
+  };
+
+  if (!atual || !nova || !confirma) return mostrar('Preencha todos os campos.', 'danger');
+  if (nova !== confirma)            return mostrar('Nova senha e confirmação não coincidem.', 'danger');
+  if (nova.length < 6)              return mostrar('A nova senha deve ter ao menos 6 caracteres.', 'danger');
+
+  // Rota de auto-serviço: backend garante que só altera o próprio usuário, exige senha_atual
+  const res = await api('usuarios/alterar-senha', {
+    senha:       await sha256(nova),
+    senha_atual: await sha256(atual)
+  });
+
+  if (!res.ok) return mostrar(res.erro || 'Erro ao alterar senha.', 'danger');
+  mostrar('✅ Senha alterada com sucesso!', 'success');
+  document.getElementById('senha-atual').value   = '';
+  document.getElementById('senha-nova').value    = '';
+  document.getElementById('senha-confirma').value = '';
+}
+
 async function carregarAdmConfig() {
   const el  = document.getElementById('adm-config');
+  if (!el) return;
   const groqConfigurado = GROQ_KEY ? '✅ Chave configurada' : 'Não configurado (usando IA local)';
   el.innerHTML = `
   <h3 style="font-size:.95rem;margin:12px 0;">Configurações do Sistema</h3>
@@ -2330,7 +2403,27 @@ async function carregarAdmConfig() {
   </div>
 
   <div id="cfg-status" class="hidden alert alert-success" style="margin-bottom:12px;">✅ Configurações salvas.</div>
-  <button class="btn btn-primary" onclick="salvarConfig()"><i class="fa fa-save"></i> Salvar</button>`;
+  <button class="btn btn-primary" onclick="salvarConfig()"><i class="fa fa-save"></i> Salvar</button>
+
+  <hr style="margin:24px 0;border-color:var(--border);">
+
+  <div style="background:#fff8f0;border:1px solid #fde8c8;border-radius:8px;padding:12px 14px;">
+    <div style="font-size:.78rem;font-weight:700;color:#b35a00;margin-bottom:10px;">🔑 Alterar Minha Senha</div>
+    <div class="form-group" style="margin-bottom:8px;">
+      <label>Senha atual</label>
+      <input type="password" id="senha-atual" placeholder="••••••••">
+    </div>
+    <div class="form-group" style="margin-bottom:8px;">
+      <label>Nova senha</label>
+      <input type="password" id="senha-nova" placeholder="••••••••">
+    </div>
+    <div class="form-group" style="margin-bottom:12px;">
+      <label>Confirmar nova senha</label>
+      <input type="password" id="senha-confirma" placeholder="••••••••">
+    </div>
+    <div id="senha-status" class="hidden alert" style="margin-bottom:8px;font-size:.82rem;"></div>
+    <button class="btn btn-warning btn-sm" onclick="alterarMinhaSenha()"><i class="fa fa-key"></i> Alterar Senha</button>
+  </div>`;
 }
 
 async function salvarConfig() {
