@@ -1570,13 +1570,50 @@ ${amostra}`;
 }
 
 // ==================== IA ANÁLISE COMPLETA ====================
+
+/** Seleciona os N docs mais relevantes por pontuação local — sem chamar Ollama */
+function _selecionarDocs(resumosPorDoc, proc, n) {
+  if (resumosPorDoc.length <= n) return resumosPorDoc.map(r => r.id);
+  const kws = [proc.titulo, proc.tipo, proc.unidade, proc.oss]
+    .filter(Boolean).join(' ').toLowerCase()
+    .split(/\s+/).filter(w => w.length > 3);
+  return resumosPorDoc
+    .map(doc => {
+      const txt   = (doc.nome + ' ' + doc.resumo).toLowerCase();
+      const score = kws.reduce((s, kw) => s + (txt.includes(kw) ? 1 : 0), 0)
+                  + (doc.resumo !== '(sem texto)' ? 0.5 : 0);
+      return { id: doc.id, score };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, n)
+    .map(d => d.id);
+}
+
+/** Parser de separadores ===CHAVE=== — nunca falha */
+function _parsearResposta(raw) {
+  const r = {}, partes = raw.split(/===([A-Z_]+)===/);
+  for (let i = 1; i < partes.length - 1; i += 2)
+    r[partes[i].trim()] = partes[i + 1].trim();
+  return r;
+}
+
+/** Converte "- item\n- item" em JSON array */
+function _parsearLista(txt) {
+  if (!txt) return '';
+  const itens = txt.split('\n').map(l => l.replace(/^[-•*]\s*/, '').trim()).filter(Boolean);
+  return itens.length > 1 ? JSON.stringify(itens) : (txt || '');
+}
+
 async function acionarIA(sei) {
+  const statusEl = document.getElementById('ia-status-msg');
+
   const ollamaOk = await testarOllama();
   if (!ollamaOk) {
-    const statusEl = document.getElementById('ia-status-msg');
     if (statusEl) statusEl.innerHTML = `<div style="color:#c0392b;font-size:.83rem;">⚠️ Ollama não está acessível em localhost:11434. Execute <code>ollama serve</code> no terminal.</div>`;
     return;
   }
+
+  if (statusEl) statusEl.innerHTML = '<span class="spinner"></span> Carregando dados do processo...';
 
   // ── Carrega dados em paralelo ─────────────────────────────────────────
   const [resDocs, resConteudo, resP, resA, resAnot, resSim] = await Promise.all([
@@ -1592,74 +1629,48 @@ async function acionarIA(sei) {
   const docs      = resDocs.documentos || [];
   const todosBloc = resConteudo.blocos || [];
 
-  const andamentos = (resA.andamentos || []).slice(-10).map(a =>
-    `${formatarDataGAS(a.data_movimento)} ${formatarHoraGAS(a.hora_movimento)}: ${a.descricao||''}`
+  const andamentos = (resA.andamentos || []).slice(-8).map(a =>
+    `${formatarDataGAS(a.data_movimento)}: ${a.descricao||''}`
   ).join('\n');
-  const anotacoes = (resAnot.anotacoes || []).slice(-5).map(a =>
-    `${formatarDataHora(a.data_hora)}: ${a.texto||''}`
-  ).join('\n');
+
   let similares = resSim.processos || [];
   if (!similares.length && proc.tipo)
-    similares = todosProcessos.filter(p => p.numero_sei !== sei && p.tipo === proc.tipo).slice(0, 3);
-  const similaresTxt = similares.map(s => `SEI ${s.numero_sei}: ${s.titulo} — ${s.situacao_atual||s.resumo_ia||''}`).join('\n');
+    similares = todosProcessos.filter(p => p.numero_sei !== sei && p.tipo === proc.tipo).slice(0, 2);
+  const similaresTxt = similares.map(s => `${s.numero_sei}: ${s.titulo}`).join('\n');
 
-  // ── Monta resumos por documento ──────────────────────────────────────
+  // ── Monta resumos curtos por documento (max 120 chars cada) ──────────
   const resumosPorDoc = docs.map(d => {
     const r = (d.resumo_doc || '').trim();
-    if (r) return { id: d.id, nome: d.nome_arquivo, resumo: r };
-    const blocoDoc = todosBloc.filter(b => b.documento_id === d.id)
+    if (r) return { id: d.id, nome: d.nome_arquivo, resumo: r.substring(0, 120) };
+    const blocos = todosBloc.filter(b => b.documento_id === d.id)
       .sort((a, b2) => a.bloco_num - b2.bloco_num);
-    const trecho = blocoDoc.map(b => b.conteudo || '').join('\n').substring(0, 800).trim();
+    const trecho = blocos.map(b => b.conteudo || '').join(' ').replace(/\s+/g,' ').substring(0, 120).trim();
     return { id: d.id, nome: d.nome_arquivo, resumo: trecho || '(sem texto)' };
   });
 
-  const resumosTxt = resumosPorDoc.map((r, i) => `[${i+1}] ${r.nome}: ${r.resumo}`).join('\n');
+  // ── Seleção local dos 5 docs mais relevantes (sem Ollama) ────────────
+  if (statusEl) statusEl.innerHTML = '<span class="spinner"></span> Selecionando documentos relevantes...';
+  const docsRelevantesIds = _selecionarDocs(resumosPorDoc, proc, 5);
 
-  // ── Seleciona os docs mais relevantes (sem Ollama se ≤5 docs) ────────
-  let docsRelevantesIds;
-  if (resumosPorDoc.length <= 5) {
-    // Poucos docs: usa todos sem chamada extra ao Ollama
-    docsRelevantesIds = resumosPorDoc.map(r => r.id);
-  } else {
-    // Muitos docs: pede ao Ollama para selecionar — com timeout de 60s
-    docsRelevantesIds = resumosPorDoc.slice(0, 5).map(r => r.id); // fallback
-    try {
-      const ctrl = new AbortController();
-      const tid  = setTimeout(() => ctrl.abort(), 60000);
-      const rSel = await fetch(OLLAMA_URL, {
-        method: 'POST', signal: ctrl.signal,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: OLLAMA_MODEL, stream: false,
-          prompt: `Lista de documentos do processo "${proc.titulo||sei}":\n${resumosTxt}\n\nResponda APENAS com os números (ex: 1,3,5) dos 5 documentos mais relevantes para análise gerencial.`
-        })
-      });
-      clearTimeout(tid);
-      const dSel = await rSel.json();
-      const nums = (dSel.response || '').match(/\d+/g) || [];
-      const selecionados = nums.map(n => parseInt(n) - 1)
-        .filter(i => i >= 0 && i < resumosPorDoc.length).slice(0, 5)
-        .map(i => resumosPorDoc[i].id);
-      if (selecionados.length) docsRelevantesIds = selecionados;
-    } catch(e) { console.warn('[IA seleção] timeout/erro, usando primeiros 5:', e.message); }
-  }
-
-  // ── Texto integral dos docs selecionados (limitado) ──────────────────
-  const charsPorDoc = Math.floor(RELEVANCIA_MAX_CHARS / Math.max(docsRelevantesIds.length, 1));
+  // ── Texto dos docs selecionados — limitado a 6000 chars total ────────
+  const CHARS_DOCS = 6000;
+  const charsPorDoc = Math.floor(CHARS_DOCS / Math.max(docsRelevantesIds.length, 1));
   const textoIntegral = docsRelevantesIds.map(docId => {
     const blocos = todosBloc.filter(b => b.documento_id === docId)
       .sort((a, b2) => a.bloco_num - b2.bloco_num).map(b => b.conteudo || '');
     const nome = (docs.find(d => d.id === docId) || {}).nome_arquivo || docId;
-    const txt  = filtrarBlocos(blocos, [proc.titulo||'', proc.unidade||'', sei], charsPorDoc);
+    const kws  = [proc.titulo||'', proc.unidade||'', sei].filter(Boolean);
+    const txt  = filtrarBlocos(blocos, kws, charsPorDoc);
     return txt ? `=== ${nome} ===\n${txt}` : '';
   }).filter(Boolean).join('\n\n');
 
-  // ── Prompt com separadores de texto — sem JSON, sem falha de parse ──
-  const SEPARADORES = ['CATEGORIA','SITUACAO_ATUAL','RESUMO','APONTAMENTOS','SUGESTOES','PROXIMOS_PASSOS','PROCESSOS_SIMILARES'];
+  // ── Lista de todos os docs (só nomes + resumo curto) ─────────────────
+  const resumosTxt = resumosPorDoc
+    .map(r => `• ${r.nome}: ${r.resumo}`)
+    .join('\n');
 
-  const prompt = `Você é assistente de gestão de processos administrativos públicos.
-
-REGRA: Analise SOMENTE o processo abaixo. Use APENAS informações presentes nos documentos e andamentos fornecidos. Não invente dados.
+  // ── Prompt compacto ───────────────────────────────────────────────────
+  const prompt = `Você é assistente de gestão de processos públicos. Use APENAS os dados abaixo.
 
 PROCESSO: ${proc.titulo||sei}
 SEI: ${sei} | Unidade: ${proc.unidade||'—'} | OSS: ${proc.oss||'—'} | Status: ${proc.status||''} | Prioridade: ${proc.prioridade||''}
@@ -1667,98 +1678,96 @@ SEI: ${sei} | Unidade: ${proc.unidade||'—'} | OSS: ${proc.oss||'—'} | Status
 ANDAMENTOS RECENTES:
 ${andamentos || 'Nenhum.'}
 
-RESUMOS DOS DOCUMENTOS:
+DOCUMENTOS (${docs.length} total — resumos):
 ${resumosTxt || 'Nenhum.'}
 
-CONTEÚDO DOS DOCUMENTOS PRINCIPAIS:
+CONTEÚDO DOS DOCUMENTOS MAIS RELEVANTES:
 ${textoIntegral || 'Não disponível.'}
+${similaresTxt ? '\nPROCESSOS SEMELHANTES:\n' + similaresTxt : ''}
 
-${similaresTxt ? 'PROCESSOS SEMELHANTES:\n' + similaresTxt : ''}
-
-Responda EXATAMENTE neste formato, usando os marcadores abaixo (não omita nenhum marcador):
+Responda com os marcadores abaixo, sem omitir nenhum:
 
 ===CATEGORIA===
-(categoria do processo em 3-5 palavras)
+(3-5 palavras)
 ===SITUACAO_ATUAL===
-(situação atual em 1-2 frases objetivas, citando apenas fatos dos documentos acima)
+(1-2 frases objetivas)
 ===RESUMO===
-(análise gerencial detalhada com contexto e histórico — mínimo 3 parágrafos — baseada exclusivamente nos documentos fornecidos)
+(análise gerencial — mínimo 2 parágrafos — baseada só nos dados acima)
 ===APONTAMENTOS===
-(liste cada ponto crítico ou risco em uma linha separada, começando com "- ")
+(cada risco em linha separada, iniciando com "- ")
 ===SUGESTOES===
-(liste cada sugestão prática em uma linha separada, começando com "- ")
+(cada sugestão em linha separada, iniciando com "- ")
 ===PROXIMOS_PASSOS===
-(liste cada próximo passo em uma linha separada, começando com "- ", incluindo responsável e prazo quando disponível)
+(cada passo em linha separada, iniciando com "- ")
 ===PROCESSOS_SIMILARES===
-(comparação com processos semelhantes, ou "Nenhum processo similar identificado.")`;
+(comparação ou "Nenhum processo similar identificado.")`;
 
-  // ── Parser de separadores: sem JSON, impossível falhar ───────────────
-  function parsearResposta(raw) {
-    const resultado = {};
-    const partes = raw.split(/===([A-Z_]+)===/);
-    // partes = ['texto antes', 'CHAVE', 'valor', 'CHAVE2', 'valor2', ...]
-    for (let i = 1; i < partes.length - 1; i += 2) {
-      const chave = partes[i].trim();
-      const valor = partes[i + 1].trim();
-      resultado[chave] = valor;
-    }
-    return resultado;
-  }
+  // ── Chamada Ollama com STREAMING — sem timeout fixo ──────────────────
+  if (statusEl) statusEl.innerHTML = '<span class="spinner"></span> Gerando análise com IA... <span id="ia-chars" style="font-size:.75rem;color:var(--muted);"></span>';
 
-  /** Converte lista markdown ("- item") em array de strings */
-  function parsearLista(texto) {
-    if (!texto) return '';
-    return texto.split('\n')
-      .map(l => l.replace(/^[-•*]\s*/, '').trim())
-      .filter(Boolean);
-  }
-
-  // ── Chamada Ollama com timeout ────────────────────────────────────────
-  const statusEl = document.getElementById('ia-status-msg');
   try {
-    const ctrl = new AbortController();
-    const tid  = setTimeout(() => ctrl.abort(), OLLAMA_TIMEOUT_MS);
-
-    if (statusEl) statusEl.innerHTML = '<span class="spinner"></span> Gerando análise (pode levar 1-2 min)...';
-
     const resp = await fetch(OLLAMA_URL, {
-      method: 'POST', signal: ctrl.signal,
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: OLLAMA_MODEL, prompt, stream: false })
+      body: JSON.stringify({ model: OLLAMA_MODEL, prompt, stream: true })
     });
-    clearTimeout(tid);
 
-    const data = await resp.json();
-    const raw  = (data.response || '').trim();
-    const ia   = parsearResposta(raw);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 
-    // Converte listas em JSON array para o renderIABox poder renderizar como bullets
-    const listaParaJSON = txt => {
-      const itens = parsearLista(txt);
-      return itens.length > 1 ? JSON.stringify(itens) : (txt || '');
-    };
+    // Lê a stream linha a linha
+    const reader  = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let raw = '';
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const linhas = buffer.split('\n');
+      buffer = linhas.pop(); // última linha pode estar incompleta
+      for (const linha of linhas) {
+        if (!linha.trim()) continue;
+        try {
+          const obj = JSON.parse(linha);
+          if (obj.response) {
+            raw += obj.response;
+            // Atualiza contador a cada 100 chars para não travar a UI
+            if (raw.length % 100 < 5) {
+              const el = document.getElementById('ia-chars');
+              if (el) el.textContent = `${raw.length} caracteres gerados...`;
+            }
+          }
+          if (obj.done) break;
+        } catch { /* linha inválida, ignora */ }
+      }
+    }
+
+    if (!raw.trim()) throw new Error('Resposta vazia do modelo');
+
+    // ── Faz parse dos separadores ────────────────────────────────────
+    const ia = _parsearResposta(raw);
+    console.log('[IA] Seções detectadas:', Object.keys(ia));
 
     await api('processos/salvar-ia', {
       numero_sei:              sei,
-      categoria:               ia.CATEGORIA                          || 'Processo',
-      situacao_atual:          ia.SITUACAO_ATUAL                     || '',
-      resumo_ia:               ia.RESUMO                             || raw,
-      apontamentos_ia:         listaParaJSON(ia.APONTAMENTOS         || ''),
-      sugestoes_ia:            listaParaJSON(ia.SUGESTOES            || ''),
-      proximos_passos_ia:      listaParaJSON(ia.PROXIMOS_PASSOS      || ''),
-      processos_similares_ref: ia.PROCESSOS_SIMILARES                || similaresTxt || ''
+      categoria:               ia.CATEGORIA              || 'Processo',
+      situacao_atual:          ia.SITUACAO_ATUAL          || '',
+      resumo_ia:               ia.RESUMO                  || raw,
+      apontamentos_ia:         _parsearLista(ia.APONTAMENTOS   || ''),
+      sugestoes_ia:            _parsearLista(ia.SUGESTOES       || ''),
+      proximos_passos_ia:      _parsearLista(ia.PROXIMOS_PASSOS || ''),
+      processos_similares_ref: ia.PROCESSOS_SIMILARES     || similaresTxt || ''
     });
 
     api('log/registrar', { acao: 'ANALISE_IA', numero_sei: sei,
-      detalhes: `${resumosPorDoc.length} docs, ${docsRelevantesIds.length} selecionados` });
+      detalhes: `${docs.length} docs, ${docsRelevantesIds.length} selecionados, ${raw.length} chars` });
+
+    if (statusEl) statusEl.innerHTML = '✅ Análise concluída!';
 
   } catch(e) {
-    if (e.name === 'AbortError') {
-      console.warn('[IA] Timeout após', OLLAMA_TIMEOUT_MS / 1000, 's');
-      if (statusEl) statusEl.innerHTML = '⚠️ Análise cancelada por timeout (3 min). Tente com menos documentos ou um modelo menor.';
-    } else {
-      console.warn('[IA] Erro:', e);
-    }
+    console.error('[IA] Erro:', e);
+    if (statusEl) statusEl.innerHTML = `<div style="color:#c0392b;font-size:.83rem;">❌ Erro ao gerar análise: ${e.message}</div>`;
   }
 }
 
@@ -2327,8 +2336,14 @@ async function carregarAdmConfig() {
   <button class="btn btn-primary" onclick="salvarConfig()"><i class="fa fa-save"></i> Salvar</button>`;
 }
 async function salvarConfig() {
-  const ollama = document.getElementById('cfg-ollama').value.trim();
-  if (ollama) { OLLAMA_MODEL = ollama; localStorage.setItem('ollama_model', ollama); }
+  let ollama = document.getElementById('cfg-ollama').value.trim();
+  // Remove prefixos de comando que o usuário pode ter digitado por engano
+  ollama = ollama.replace(/^ollama\s+(pull|run|serve)\s+/i, '').trim();
+  if (ollama) {
+    OLLAMA_MODEL = ollama;
+    localStorage.setItem('ollama_model', ollama);
+    document.getElementById('cfg-ollama').value = ollama; // mostra o nome limpo
+  }
   const s = document.getElementById('cfg-status');
   s.classList.remove('hidden');
   setTimeout(() => s.classList.add('hidden'), 3000);
