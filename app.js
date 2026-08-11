@@ -1216,7 +1216,7 @@ async function processarAndamentos(sei) {
 
 // Gera resumo específico de andamentos e salva em aprendizado_ia
 async function gerarResumoAndamentos(sei) {
-  const ollamaOk = await testarOllama(); if (!ollamaOk) return;
+  if (!GROQ_KEY) { const ollamaOk = await testarOllama(); if (!ollamaOk) return; }
   const resA = await api('andamentos/listar?sei=' + sei);
   const andamentos = resA.andamentos || [];
   if (!andamentos.length) return;
@@ -1245,9 +1245,7 @@ HISTÓRICO:
 ${andamentosTxt.substring(0, 8000)}`;
 
   try {
-    const resp = await fetch(OLLAMA_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ model:OLLAMA_MODEL, prompt, stream:false }) });
-    const data = await resp.json();
-    const raw  = (data.response || '').trim();
+    const raw = await chamarLLM(prompt, null, null);
     let parsed;
     const match = raw.match(/\{[\s\S]*\}/);
     if (match) { try { parsed = JSON.parse(match[0]); } catch { parsed = null; } }
@@ -1534,6 +1532,7 @@ async function gerarResumosDocumentos(sei) {
 
 // ==================== RESUMO POR DOCUMENTO ====================
 async function gerarResumoDocumento(sei, docId, docNome, textoCompleto) {
+  // ⚠️ Usa APENAS Ollama (local) — documentos podem conter dados sensíveis/pessoais
   const ollamaOk = await testarOllama();
   if (!ollamaOk) return;
 
@@ -1558,8 +1557,8 @@ ${amostra}`;
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: OLLAMA_MODEL, prompt, stream: false })
     });
-    const data    = await resp.json();
-    const resumo  = (data.response || '').trim().substring(0, 500);
+    const data   = await resp.json();
+    const resumo = (data.response || '').trim().substring(0, 500);
     if (resumo) {
       const resSalvo = await api('documentos/salvar-resumo', { doc_id: docId, resumo_doc: resumo });
       if (!resSalvo.sucesso) {
