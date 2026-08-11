@@ -33,9 +33,12 @@ function _urgenciaInfo(p) {
 }
 const OLLAMA_URL   = 'http://localhost:11434/api/generate';
 let   OLLAMA_MODEL = localStorage.getItem('ollama_model') || 'llama3.2:3b';
+const GROQ_URL     = 'https://api.groq.com/openai/v1/chat/completions';
+const GROQ_MODEL   = 'llama-3.3-70b-versatile';
+let   GROQ_KEY     = localStorage.getItem('groq_api_key') || '';
 const BLOCO_MAX    = 49000;
-const RELEVANCIA_MAX_CHARS = 20000; // reduzido para performance (era 60000)
-const OLLAMA_TIMEOUT_MS    = 180000; // 3 minutos por chamada Ollama
+const RELEVANCIA_MAX_CHARS = 20000;
+const OLLAMA_TIMEOUT_MS    = 180000;
 
 // ==================== STATE ====================
 let API_URL        = '';
@@ -1702,48 +1705,21 @@ Responda com os marcadores abaixo, sem omitir nenhum:
 ===PROCESSOS_SIMILARES===
 (comparação ou "Nenhum processo similar identificado.")`;
 
-  // ── Chamada Ollama com STREAMING — sem timeout fixo ──────────────────
-  if (statusEl) statusEl.innerHTML = '<span class="spinner"></span> Gerando análise com IA... <span id="ia-chars" style="font-size:.75rem;color:var(--muted);"></span>';
+  // ── Chamada ao LLM (Groq → Ollama fallback) ──────────────────────────
+  if (statusEl) statusEl.innerHTML = `
+    <span class="spinner"></span> Gerando análise...
+    <span class="llm-source" style="font-size:.75rem;color:var(--muted);margin-left:6px;"></span>
+    <span id="ia-chars" style="font-size:.75rem;color:var(--muted);margin-left:4px;"></span>`;
 
   try {
-    const resp = await fetch(OLLAMA_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: OLLAMA_MODEL, prompt, stream: true })
-    });
-
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-
-    // Lê a stream linha a linha
-    const reader  = resp.body.getReader();
-    const decoder = new TextDecoder();
-    let raw = '';
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const linhas = buffer.split('\n');
-      buffer = linhas.pop(); // última linha pode estar incompleta
-      for (const linha of linhas) {
-        if (!linha.trim()) continue;
-        try {
-          const obj = JSON.parse(linha);
-          if (obj.response) {
-            raw += obj.response;
-            // Atualiza contador a cada 100 chars para não travar a UI
-            if (raw.length % 100 < 5) {
-              const el = document.getElementById('ia-chars');
-              if (el) el.textContent = `${raw.length} caracteres gerados...`;
-            }
-          }
-          if (obj.done) break;
-        } catch { /* linha inválida, ignora */ }
-      }
-    }
-
-    if (!raw.trim()) throw new Error('Resposta vazia do modelo');
+    const raw = await chamarLLM(prompt,
+      // callback de progresso (só Ollama usa — Groq retorna tudo de uma vez)
+      (parcial) => {
+        const el = document.getElementById('ia-chars');
+        if (el && parcial.length % 80 < 4) el.textContent = `${parcial.length} chars...`;
+      },
+      statusEl
+    );
 
     // ── Faz parse dos separadores ────────────────────────────────────
     const ia = _parsearResposta(raw);
@@ -2327,23 +2303,51 @@ async function removerUsuario(usuario) {
 
 async function carregarAdmConfig() {
   const el  = document.getElementById('adm-config');
-  const res = await api('config/listar');
-  const cfg = res.config || {};
+  const groqConfigurado = GROQ_KEY ? '✅ Chave configurada' : 'Não configurado (usando IA local)';
   el.innerHTML = `
   <h3 style="font-size:.95rem;margin:12px 0;">Configurações do Sistema</h3>
-  <div class="form-group"><label>Modelo Ollama</label><input id="cfg-ollama" value="${OLLAMA_MODEL}" placeholder="llama3.2:3b"></div>
-  <div id="cfg-status" class="hidden alert alert-success">Configurações salvas.</div>
+
+  <div style="background:#f0f7ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px 14px;margin-bottom:16px;">
+    <div style="font-size:.78rem;font-weight:700;color:#1d4ed8;margin-bottom:8px;">⚡ Groq (IA em Nuvem) — Gratuito</div>
+    <div class="form-group" style="margin-bottom:8px;">
+      <label>API Key <small style="color:var(--muted);">— obtenha grátis em <a href="https://console.groq.com" target="_blank">console.groq.com</a></small></label>
+      <input id="cfg-groq-key" type="password" value="${GROQ_KEY}" placeholder="gsk_...">
+    </div>
+    <div style="font-size:.75rem;color:#555;line-height:1.5;">
+      Status: <strong>${groqConfigurado}</strong><br>
+      Quando configurado: Groq é usado para análises e chat. Se o limite for atingido, o sistema cai automaticamente para a IA local.<br>
+      Os resumos de documentos sempre ficam no Ollama local (privacidade dos dados).
+    </div>
+  </div>
+
+  <div style="background:#f8f9fa;border:1px solid #e0e0e0;border-radius:8px;padding:12px 14px;margin-bottom:16px;">
+    <div style="font-size:.78rem;font-weight:700;color:#444;margin-bottom:8px;">🖥️ Ollama (IA Local)</div>
+    <div class="form-group" style="margin-bottom:0;">
+      <label>Modelo ativo</label>
+      <input id="cfg-ollama" value="${OLLAMA_MODEL}" placeholder="qwen2.5:7b">
+    </div>
+    <div style="font-size:.75rem;color:#888;margin-top:6px;">Usado para: resumos de documentos (sempre) + análises quando Groq não está configurado ou atinge o limite.</div>
+  </div>
+
+  <div id="cfg-status" class="hidden alert alert-success" style="margin-bottom:12px;">✅ Configurações salvas.</div>
   <button class="btn btn-primary" onclick="salvarConfig()"><i class="fa fa-save"></i> Salvar</button>`;
 }
+
 async function salvarConfig() {
+  // Groq API Key
+  const groqKey = document.getElementById('cfg-groq-key').value.trim();
+  GROQ_KEY = groqKey;
+  localStorage.setItem('groq_api_key', groqKey);
+
+  // Modelo Ollama — limpa prefixos de comando digitados por engano
   let ollama = document.getElementById('cfg-ollama').value.trim();
-  // Remove prefixos de comando que o usuário pode ter digitado por engano
   ollama = ollama.replace(/^ollama\s+(pull|run|serve)\s+/i, '').trim();
   if (ollama) {
     OLLAMA_MODEL = ollama;
     localStorage.setItem('ollama_model', ollama);
-    document.getElementById('cfg-ollama').value = ollama; // mostra o nome limpo
+    document.getElementById('cfg-ollama').value = ollama;
   }
+
   const s = document.getElementById('cfg-status');
   s.classList.remove('hidden');
   setTimeout(() => s.classList.add('hidden'), 3000);
@@ -2567,11 +2571,115 @@ Responda em português, de forma objetiva e especializada.
 - Se não encontrar o processo mencionado, informe e ofereça uma análise geral do contexto disponível
 - Máx 300 palavras`;
 
-    const resp = await fetch(OLLAMA_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ model:OLLAMA_MODEL, prompt, stream:false }) });
-    const data = await resp.json();
-    loadMsg.textContent = data.response || 'Sem resposta.';
+    const resposta = await chamarLLM(prompt, null, null);
+    loadMsg.textContent = resposta || 'Sem resposta.';
   } catch(e) { loadMsg.textContent = 'Erro ao contatar IA: ' + e.message; }
   msgs.scrollTop = msgs.scrollHeight;
+}
+
+// ==================== LLM UNIFICADO (Groq → Ollama fallback) ====================
+
+/**
+ * Chama o LLM disponível: tenta Groq primeiro (se chave configurada),
+ * cai para Ollama em caso de limite de taxa (429) ou erro.
+ * Retorna a resposta como string, ou lança exceção se ambos falharem.
+ * @param {string} prompt
+ * @param {function} [onToken] - callback opcional chamado a cada token (streaming Ollama)
+ * @param {HTMLElement} [statusEl] - elemento para mensagens de status
+ */
+async function chamarLLM(prompt, onToken, statusEl) {
+
+  // ── Tenta Groq se chave configurada ──────────────────────────────────
+  if (GROQ_KEY) {
+    try {
+      if (statusEl) {
+        const src = statusEl.querySelector('.llm-source');
+        if (src) src.textContent = '⚡ Groq';
+      }
+      const resp = await fetch(GROQ_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${GROQ_KEY}`
+        },
+        body: JSON.stringify({
+          model: GROQ_MODEL,
+          messages: [{ role: 'user', content: prompt }],
+          stream: false,
+          max_tokens: 2048,
+          temperature: 0.3
+        })
+      });
+
+      if (resp.status === 429) {
+        // Limite atingido — fallback para Ollama com aviso
+        console.warn('[Groq] Limite de taxa atingido — usando Ollama como fallback');
+        if (statusEl) {
+          const src = statusEl.querySelector('.llm-source');
+          if (src) src.textContent = '🔄 Limite Groq — usando IA local';
+        }
+        throw new Error('GROQ_RATE_LIMIT');
+      }
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(`Groq HTTP ${resp.status}: ${err.error?.message || ''}`);
+      }
+
+      const data = await resp.json();
+      return (data.choices?.[0]?.message?.content || '').trim();
+
+    } catch(e) {
+      if (e.message !== 'GROQ_RATE_LIMIT') {
+        console.warn('[Groq] Erro, usando Ollama:', e.message);
+        if (statusEl) {
+          const src = statusEl.querySelector('.llm-source');
+          if (src) src.textContent = '🔄 Erro Groq — usando IA local';
+        }
+      }
+      // Cai para Ollama abaixo
+    }
+  }
+
+  // ── Ollama (local) com streaming ──────────────────────────────────────
+  if (statusEl) {
+    const src = statusEl.querySelector('.llm-source');
+    if (src && !GROQ_KEY) src.textContent = '🖥️ IA local';
+  }
+
+  const resp = await fetch(OLLAMA_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: OLLAMA_MODEL, prompt, stream: true })
+  });
+
+  if (!resp.ok) throw new Error(`Ollama HTTP ${resp.status}`);
+
+  const reader  = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let raw = '', buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const linhas = buffer.split('\n');
+    buffer = linhas.pop();
+    for (const linha of linhas) {
+      if (!linha.trim()) continue;
+      try {
+        const obj = JSON.parse(linha);
+        if (obj.response) {
+          raw += obj.response;
+          if (onToken) onToken(raw);
+        }
+        if (obj.done) break;
+      } catch { /* linha inválida */ }
+    }
+  }
+
+  if (!raw.trim()) throw new Error('Resposta vazia do modelo');
+  return raw.trim();
 }
 
 // ==================== OLLAMA ====================
