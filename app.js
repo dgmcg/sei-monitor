@@ -2237,6 +2237,7 @@ function switchTabAdmin(el, id) {
     if (e) e.classList.toggle('hidden', t !== id);
   });
   if (id==='adm-config') carregarAdmConfig();
+  else if (id==='adm-usuarios') carregarAdmUsuarios();  
   else if (id==='adm-dados') carregarAdmDados();
   else if (id==='adm-bases') carregarAdmBases();
   else if (id==='adm-logs') carregarAdmLogs();
