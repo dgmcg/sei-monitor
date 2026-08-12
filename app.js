@@ -1136,7 +1136,6 @@ async function salvarAnotacao(sei) {
     }
   }
 }
-}
 
 // ==================== EDITAR PROCESSO ====================
 function editarProcesso(sei) {
