@@ -804,7 +804,7 @@ async function abrirProcesso(sei) {
   <div id="tab-anotacoes" class="hidden">
     <div style="margin-bottom:16px;">
       <textarea id="nova-anotacao" rows="3" placeholder="Registre uma atualização de gestão, observação ou decisão..." style="width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;font-size:.85rem;box-sizing:border-box;"></textarea>
-      <button class="btn btn-primary btn-sm mt-2" onclick="salvarAnotacao('${sei}')"><i class="fa fa-save"></i> Adicionar Anotação</button>
+      <button id="btn-add-anotacao" class="btn btn-primary btn-sm mt-2" onclick="salvarAnotacao('${sei}')"><i class="fa fa-save"></i> Adicionar Anotação</button>
     </div>
     ${anotacoes.length ? anotacoes.map(a => `
       <div class="anotacao-item">
@@ -1112,14 +1112,30 @@ async function registrarSemMovimentacao(sei) {
 async function salvarAnotacao(sei) {
   const texto = document.getElementById('nova-anotacao').value.trim();
   if (!texto) { alert('Digite uma anotação.'); return; }
-  const res = await api('anotacoes/salvar', { sei, texto });
-  if (!res.ok) { alert('Erro: ' + res.erro); return; }
-  api('log/registrar', { acao: 'ANOTACAO', numero_sei: sei, detalhes: texto.substring(0,100) });
-  document.getElementById('nova-anotacao').value = '';
-  const statusEl = document.getElementById('ia-status-msg');
-  if (statusEl) statusEl.innerHTML = '<span class="spinner"></span> Atualizando análise com nova anotação...';
-  await acionarIA(sei);
-  abrirProcesso(sei);
+
+  const btn = document.getElementById('btn-add-anotacao');
+  if (btn) {
+    if (btn.disabled) return; // já está enviando — ignora cliques extras
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Salvando...';
+  }
+
+  try {
+    const res = await api('anotacoes/salvar', { sei, texto });
+    if (!res.ok) { alert('Erro: ' + res.erro); return; }
+    api('log/registrar', { acao: 'ANOTACAO', numero_sei: sei, detalhes: texto.substring(0,100) });
+    document.getElementById('nova-anotacao').value = '';
+    const statusEl = document.getElementById('ia-status-msg');
+    if (statusEl) statusEl.innerHTML = '<span class="spinner"></span> Atualizando análise com nova anotação...';
+    await acionarIA(sei);
+    abrirProcesso(sei); // recarrega a view — o botão é recriado já habilitado
+  } finally {
+    if (btn && document.body.contains(btn)) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa fa-save"></i> Adicionar Anotação';
+    }
+  }
+}
 }
 
 // ==================== EDITAR PROCESSO ====================
